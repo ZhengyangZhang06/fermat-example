@@ -35,6 +35,34 @@ another comparator pass before advancing the problem branch. Deep repository pat
 a stable short checkout path under `/tmp/humanize-lean-worktrees`; the named Git branch retains the
 durable proof history even if that disposable checkout is later removed.
 
+## How the flow works
+
+1. **Restore or create the theorem node.** The controller loads the durable `dag.json`, preserves
+   every accepted checkpoint, and creates the root only when no run exists.
+2. **Generate one scaffold.** The node invokes `humanize1:gen-plan` in direct mode exactly once.
+   The resulting scaffold is frozen. There is no candidate-plan review loop and no later plan
+   regeneration.
+3. **Prove the mathematics in natural language.** A Codex worker writes a complete proof and an
+   independent Codex reviewer checks the first invalid step. A rejection revises the latest proof,
+   not the scaffold. `natural_proof_attempts` is only the size of one checkpoint batch: reaching it
+   starts another batch from the latest draft and cannot kill the node.
+4. **Decide whether to split.** After the prose proof passes, a decomposition audit checks each
+   proposed child theorem, its exact Lean statement and name, and the acyclic dependency list. A
+   child repeats the same lifecycle, so recursive workers also produce prose before Lean.
+5. **Launch the ready frontier.** Every node whose explicit prerequisites and required children are
+   proved is launched, up to `max_parallel_children`. Independent leaves from the same problem run
+   together. In the diagram, `A --> B` always means that A depends on B.
+6. **Formalize in isolation.** Each ready Lean node gets a named Git branch and a short independent
+   worktree. The official `humanize1:rlcr` worker/reviewer loop builds the Lean proof without sharing
+   source files or build scratch state with sibling workers.
+7. **Apply the acceptance gates.** The controller runs the project comparator, then a fresh Codex
+   reviewer inspects the exact candidate and reruns that comparator itself. Accepted commits are
+   integrated into the problem branch. If concurrent proofs touched the same file, a separate
+   integration worktree preserves both histories and the comparator checks the combined result.
+8. **Publish or revise.** Every accepted theorem is written to the wiki immediately and unlocks its
+   dependants. A mathematical, Lean, comparator, or integration rejection is fed back into the
+   latest natural-language proof at the appropriate upper level; it does not create another plan.
+
 ## Requirements
 
 - Humanize with the `hmz` command and the official `humanize1` flowverse installed.
@@ -70,11 +98,43 @@ hmz check user/recursive_lean_prover
 
 ## Run
 
+First create a task file such as `PROBLEM.md`. It should state the exact theorem(s), the Lean file
+that may be edited, any files that must not be inspected or changed, and any project-specific
+acceptance rules. Internet access is enabled by the agent arguments below, but a task may impose a
+narrower source policy.
+
+Provide a project-specific comparator wrapper. It must return a nonzero status on rejection and
+print the configured marker only after every required check succeeds. Adapt this outline to the
+repository's real evaluator:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+lake env lean Submission.lean
+./tools/project-comparator "$HUMANIZE_NODE_ID"
+printf '%s\n' 'Your solution is okay!'
+```
+
+The wrapper can use `HUMANIZE_NODE_ID`, `HUMANIZE_NODE_STATEMENT`,
+`HUMANIZE_LEAN_FILES`, `HUMANIZE_RUN_DIR`, and `HUMANIZE_WIKI_DIR`. Never print the success marker
+before the real evaluator succeeds.
+
 Copy and edit the example config, especially `lean_target` and `comparator_command`:
 
 ```sh
 cp ~/.humanize/flows/recursive_lean_prover/config.example.yaml ./recursive-proof.yaml
 ```
+
+The settings most often changed are:
+
+- `max_depth`: deepest recursive decomposition level; the root is depth 0.
+- `max_children` and `max_nodes`: fan-out and total DAG bounds.
+- `max_parallel_children`: number of dependency-ready nodes allowed to work concurrently.
+- `natural_proof_attempts`: revisions per saved batch, not a total proof-attempt limit.
+- `rlcr_rounds`: rounds in one official Lean RLCR invocation.
+- `comparator_timeout: 21600`: six hours for each comparator execution.
+- `lean_target`: project-relative candidate `.lean` file.
+- `comparator_command`: argv-style command; it is not evaluated by a shell.
 
 Then run both worker and reviewer on Codex:
 
@@ -88,6 +148,11 @@ hmz exec -f user/recursive_lean_prover -c recursive-proof.yaml \
 Both roles use `permission=auto`: RLCR's plan-integrity guards operate on permission requests,
 and a Lean comparator may need to write build artifacts. The reviewer prompt forbids edits and
 the reviewer remains a separate Codex agent with independent sessions.
+
+Use `Ctrl-C` to stop only this foreground supervisor. To resume, run the same `hmz exec` command
+with the same task text, config, and repository. The flow reuses the durable run, accepted proof
+nodes, Git branches, wiki pages, and the latest rejected natural-language draft. Do not use a broad
+`pkill` when other experiments share the machine.
 
 ## Observe
 
@@ -123,6 +188,10 @@ blocking prerequisite.
   review when a base branch is available.
 - The controller runs the comparator with a default six-hour timeout. Only after that passes does
   a fresh Lean reviewer inspect the exact candidate and personally rerun the same comparator.
+- If independently accepted histories must be combined, integration runs the comparator again on
+  the merged candidate before advancing the problem branch.
+- A decomposed parent is rechecked after its children are integrated; the root must still pass the
+  repository's final comparator contract.
 - Any mathematical rejection returns to the latest natural-language proof. Only a full outer
   comparator/reviewer pass marks the node `proved` and publishes it.
 
