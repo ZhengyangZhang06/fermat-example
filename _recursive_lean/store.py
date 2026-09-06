@@ -109,9 +109,7 @@ class Store:
             for name, value in fields.items():
                 setattr(record, name, value)
             self.render()
-            print(  # noqa: T201
-                f"[DAG] {node_id}: {status}" + (f" — {message}" if message else "")
-            )
+            print(f"[DAG] {node_id}: {status}" + (f" — {message}" if message else ""))
 
     def render(self) -> None:
         """Write machine-readable state, Mermaid, and a compact Markdown status view."""
@@ -128,8 +126,10 @@ class Store:
             )
             mermaid = [
                 "flowchart TD",
-                '  legend["Every solid arrow A --&gt; B means A depends on B<br/>'
-                'B must be proved before A can finish"]',
+                (
+                    '  legend["Every solid arrow A --&gt; B means A depends on B<br/>'
+                    'B must be proved before A can finish"]'
+                ),
             ]
             for record in ordered:
                 label = self._label(record, self._scheduling(record))

@@ -169,17 +169,15 @@ class Runtime:
             self.store.update(
                 "root", "interrupted", "resuming an interrupted root node"
             )
-        print(f"Live DAG: {self.run_root / 'DAG.md'}")  # noqa: T201
-        print(  # noqa: T201
-            f"Theorem wiki: {self.project / self.config.wiki_dir / 'README.md'}"
-        )
+        print(f"Live DAG: {self.run_root / 'DAG.md'}")
+        print(f"Theorem wiki: {self.project / self.config.wiki_dir / 'README.md'}")
         result = (
             self._resume_existing_dag(root)
             if root.children and root.plan and root.natural_proof
             else self._solve(root)
         )
         if result.ok:
-            print(  # noqa: T201
+            print(
                 f"Proved root theorem; {len(result.theorems)} theorem record(s) at root."
             )
             self.state.clear()
@@ -190,7 +188,7 @@ class Runtime:
             run_dir=str(self.run_root.relative_to(self.project)),
             last_failure=result.feedback,
         )
-        print(f"Root theorem not accepted: {result.feedback}")  # noqa: T201
+        print(f"Root theorem not accepted: {result.feedback}")
 
     def _solve(self, node: NodeRecord) -> SolveResult:
         """Solve one node; child calls use this same method and can split again."""
@@ -226,7 +224,9 @@ class Runtime:
                 if plan is not None:
                     feedback = node.message
             if plan is None:
-                feedback = "One-time direct plan generation produced no usable scaffold."
+                feedback = (
+                    "One-time direct plan generation produced no usable scaffold."
+                )
                 break
             natural = self._accepted_natural_proof(node, plan, feedback)
             if natural is None:
@@ -617,7 +617,7 @@ class Runtime:
             futures: dict[Any, str] = {}
             while pending or futures:
                 progressed = False
-                for key in sorted(tuple(pending)):
+                for key in sorted(pending):
                     child = by_key[key]
                     dependency_failure = next(
                         (
@@ -1068,7 +1068,9 @@ class Runtime:
         atomic_text(path, log)
         return passed, path, log
 
-    def _lean_files(self, before: str, after: str, cwd: Path | None = None) -> list[str]:
+    def _lean_files(
+        self, before: str, after: str, cwd: Path | None = None
+    ) -> list[str]:
         """Identify Lean files changed by this node, plus an explicitly configured target."""
         workspace = cwd or self.project
         found: set[str] = set()
@@ -1084,10 +1086,7 @@ class Runtime:
                 found.update(
                     one.strip() for one in completed.stdout.splitlines() if one.strip()
                 )
-        if (
-            self.config.lean_target
-            and (workspace / self.config.lean_target).is_file()
-        ):
+        if self.config.lean_target and (workspace / self.config.lean_target).is_file():
             found.add(self.config.lean_target)
         return sorted(found)
 
@@ -1210,7 +1209,9 @@ class Runtime:
             node.worktree = str(path)
             return path
         if path.exists() and any(path.iterdir()):
-            raise RuntimeError(f"node worktree path exists but is not a Git worktree: {path}")
+            raise RuntimeError(
+                f"node worktree path exists but is not a Git worktree: {path}"
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         branch = self._node_branch(node)
         detail = "unknown Git error"
@@ -1228,19 +1229,22 @@ class Runtime:
                     text=True,
                     check=False,
                 )
-                exists = subprocess.run(
-                    [
-                        "git",
-                        "show-ref",
-                        "--verify",
-                        "--quiet",
-                        f"refs/heads/{branch}",
-                    ],
-                    cwd=self.project,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                ).returncode == 0
+                exists = (
+                    subprocess.run(
+                        [
+                            "git",
+                            "show-ref",
+                            "--verify",
+                            "--quiet",
+                            f"refs/heads/{branch}",
+                        ],
+                        cwd=self.project,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    ).returncode
+                    == 0
+                )
                 arguments = (
                     ["git", "worktree", "add", str(path), branch]
                     if exists
@@ -1376,7 +1380,10 @@ class Runtime:
                 != 0
             ]
             if not commits:
-                return True, "all reviewed commits were already present in the problem branch"
+                return (
+                    True,
+                    "all reviewed commits were already present in the problem branch",
+                )
             if canonical == before:
                 merged = subprocess.run(
                     ["git", "merge", "--ff-only", after],
@@ -1387,10 +1394,15 @@ class Runtime:
                 )
                 if merged.returncode:
                     detail = (merged.stderr or merged.stdout).strip()
-                    return False, f"could not fast-forward reviewed node history: {detail}"
+                    return (
+                        False,
+                        f"could not fast-forward reviewed node history: {detail}",
+                    )
                 return True, f"fast-forwarded {len(commits)} reviewed commit(s)"
 
-            scratch_parent = self.project.parent / ".recursive-lean-integration-worktrees"
+            scratch_parent = (
+                self.project.parent / ".recursive-lean-integration-worktrees"
+            )
             scratch_parent.mkdir(parents=True, exist_ok=True)
             temporary = Path(
                 tempfile.mkdtemp(
@@ -1430,8 +1442,10 @@ class Runtime:
                     if not passed:
                         return (
                             False,
-                            "combined parallel history failed its integration comparator; "
-                            f"see {log_path.relative_to(self.project)}",
+                            (
+                                "combined parallel history failed its integration comparator; "
+                                f"see {log_path.relative_to(self.project)}"
+                            ),
                         )
                 integration_head = self._git_head(integration)
                 merged = subprocess.run(
@@ -1443,9 +1457,15 @@ class Runtime:
                 )
                 if merged.returncode:
                     detail = (merged.stderr or merged.stdout).strip()
-                    return False, f"could not fast-forward reconciled node history: {detail}"
+                    return (
+                        False,
+                        f"could not fast-forward reconciled node history: {detail}",
+                    )
                 method = "union-reconciled" if unioned else "rebased"
-                return True, f"{method} and integrated {len(commits)} reviewed commit(s)"
+                return (
+                    True,
+                    f"{method} and integrated {len(commits)} reviewed commit(s)",
+                )
             finally:
                 subprocess.run(
                     ["git", "worktree", "remove", "--force", str(integration)],
@@ -1503,8 +1523,12 @@ class Runtime:
                     text=True,
                     check=False,
                 )
-                return False, unioned, (
-                    f"reviewed node commit {commit[:12]} could not be reconciled: {detail}"
+                return (
+                    False,
+                    unioned,
+                    (
+                        f"reviewed node commit {commit[:12]} could not be reconciled: {detail}"
+                    ),
                 )
             unioned = True
             continued = subprocess.run(
@@ -1529,7 +1553,11 @@ class Runtime:
                     text=True,
                     check=False,
                 )
-                return False, unioned, f"could not commit reconciled Lean sources: {detail}"
+                return (
+                    False,
+                    unioned,
+                    f"could not commit reconciled Lean sources: {detail}",
+                )
         return True, unioned, "candidate commits applied"
 
     @staticmethod
@@ -1541,11 +1569,7 @@ class Runtime:
             capture_output=True,
             check=False,
         )
-        paths = [
-            one.decode("utf-8")
-            for one in unmerged.stdout.split(b"\0")
-            if one
-        ]
+        paths = [one.decode("utf-8") for one in unmerged.stdout.split(b"\0") if one]
         if unmerged.returncode or not paths:
             return False, "Git reported no resolvable unmerged paths"
         if any(not path.endswith(".lean") for path in paths):
@@ -1607,7 +1631,11 @@ class Runtime:
             text=True,
             check=False,
         )
-        return Path(completed.stdout.strip()).resolve() if not completed.returncode else None
+        return (
+            Path(completed.stdout.strip()).resolve()
+            if not completed.returncode
+            else None
+        )
 
     @staticmethod
     def _git_clean(cwd: Path) -> bool:
@@ -1707,8 +1735,8 @@ class Runtime:
 - Full controller plan: `{accepted_plan}`
 - Accepted natural proof: `{natural_path}`
 - Declaration name: `{node.lean_name}`
-- Frozen child type: `{node.lean_statement or 'official root Challenge declarations'}`
-- Lean target: `{self.config.lean_target or 'infer the repository target'}`
+- Frozen child type: `{node.lean_statement or "official root Challenge declarations"}`
+- Lean target: `{self.config.lean_target or "infer the repository target"}`
 
 Comparator-approved dependencies:
 

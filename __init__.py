@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, NamedTuple
 
-from _recursive_lean.runtime import Runtime
+from hmz.flows import Agent, Moment, flow, load
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from hmz.flows import Agent, Moment, flow, load
+from _recursive_lean.runtime import Runtime
 
 MIN_RECURSIVE_NODES = 3
 

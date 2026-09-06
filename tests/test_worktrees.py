@@ -166,7 +166,9 @@ class WorktreeTests(unittest.TestCase):
             git(project, "config", "user.name", "Flow Test")
             git(project, "config", "user.email", "flow-test@example.invalid")
             (project / ".gitignore").write_text(".humanize/\n.lake/\n")
-            (project / "Submission.lean").write_text("namespace Submission\nend Submission\n")
+            (project / "Submission.lean").write_text(
+                "namespace Submission\nend Submission\n"
+            )
             git(project, "add", ".gitignore", "Submission.lean")
             git(project, "commit", "-m", "test: initialize fixture")
             (project / ".lake" / "packages").mkdir(parents=True)
@@ -232,7 +234,9 @@ class WorktreeTests(unittest.TestCase):
             git(project, "config", "user.name", "Flow Test")
             git(project, "config", "user.email", "flow-test@example.invalid")
             (project / ".gitignore").write_text(".humanize/\n.lake/\n")
-            (project / "Submission.lean").write_text("theorem original : True := by trivial\n")
+            (project / "Submission.lean").write_text(
+                "theorem original : True := by trivial\n"
+            )
             git(project, "add", ".gitignore", "Submission.lean")
             git(project, "commit", "-m", "test: initialize long-path fixture")
 
@@ -291,7 +295,9 @@ class WorktreeTests(unittest.TestCase):
             git(project, "config", "user.name", "Flow Test")
             git(project, "config", "user.email", "flow-test@example.invalid")
             (project / ".gitignore").write_text(".humanize/\n.lake/\n")
-            (project / "Submission.lean").write_text("namespace Submission\nend Submission\n")
+            (project / "Submission.lean").write_text(
+                "namespace Submission\nend Submission\n"
+            )
             git(project, "add", ".gitignore", "Submission.lean")
             git(project, "commit", "-m", "test: initialize parallel fixture")
 
@@ -562,7 +568,9 @@ class WorktreeTests(unittest.TestCase):
                         "end Submission\n"
                     )
                     git(worktree, "add", "Submission.lean")
-                    git(worktree, "commit", "-m", f"feat: prove same-file leaf {number}")
+                    git(
+                        worktree, "commit", "-m", f"feat: prove same-file leaf {number}"
+                    )
                     heads.append(runtime._git_head(worktree))
 
                 subprocess.run(

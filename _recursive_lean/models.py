@@ -92,7 +92,9 @@ class Subproblem(BaseModel):
         if "\n" in normalized or "\r" in normalized:
             raise ValueError("lean_statement must be a single line")
         if ":=" in normalized:
-            raise ValueError("lean_statement must be a type expression, not a declaration")
+            raise ValueError(
+                "lean_statement must be a type expression, not a declaration"
+            )
         return normalized
 
 
