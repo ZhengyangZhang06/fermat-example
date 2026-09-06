@@ -46,6 +46,13 @@ if TYPE_CHECKING:
 GEN_PLAN = "official/humanize1:gen-plan"
 RLCR = "official/humanize1:rlcr"
 WORKTREE_RLCR = f"{Path(__file__).resolve().parent.parent}:worktree-rlcr"
+INTEGRATION_GIT = (
+    "git",
+    "-c",
+    "user.name=Humanize Recursive Integrator",
+    "-c",
+    "user.email=humanize-recursive@example.invalid",
+)
 
 
 class _WorkspaceAgent:
@@ -1439,7 +1446,7 @@ class Runtime:
         unioned = False
         for commit in commits:
             picked = subprocess.run(
-                ["git", "cherry-pick", commit],
+                [*INTEGRATION_GIT, "cherry-pick", commit],
                 cwd=integration,
                 capture_output=True,
                 text=True,
@@ -1461,7 +1468,13 @@ class Runtime:
                 )
             unioned = True
             continued = subprocess.run(
-                ["git", "-c", "core.editor=true", "cherry-pick", "--continue"],
+                [
+                    *INTEGRATION_GIT,
+                    "-c",
+                    "core.editor=true",
+                    "cherry-pick",
+                    "--continue",
+                ],
                 cwd=integration,
                 capture_output=True,
                 text=True,

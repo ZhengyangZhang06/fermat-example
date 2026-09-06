@@ -342,6 +342,75 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_divergent_integration_supplies_its_own_committer_identity(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / "identity_problem"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Fixture Author")
+            git(project, "config", "user.email", "fixture@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text(
+                "namespace Submission\n\nend Submission\n"
+            )
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize identity fixture")
+
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                )
+                runtime = Runtime(None, "identity fixture", config, {})
+                node = NodeRecord(
+                    id="root.identity_leaf-a1",
+                    title="Identity leaf",
+                    statement="True",
+                    attempts=1,
+                )
+                worktree = runtime._node_worktree(node)
+                before = runtime._git_head(worktree)
+                (worktree / "Candidate.lean").write_text(
+                    "theorem candidate : True := by trivial\n"
+                )
+                git(worktree, "add", "Candidate.lean")
+                git(worktree, "commit", "-m", "feat: add candidate")
+                after = runtime._git_head(worktree)
+
+                (project / "Canonical.lean").write_text(
+                    "theorem canonical : True := by trivial\n"
+                )
+                git(project, "add", "Canonical.lean")
+                git(project, "commit", "-m", "feat: advance canonical")
+                subprocess.run(
+                    ["git", "config", "--unset-all", "user.name"],
+                    cwd=project,
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "config", "--unset-all", "user.email"],
+                    cwd=project,
+                    check=True,
+                )
+
+                with patch.dict(
+                    os.environ,
+                    {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"},
+                ):
+                    integrated, feedback = runtime._integrate_candidate(
+                        worktree, before, after
+                    )
+
+                self.assertTrue(integrated, feedback)
+                self.assertIn("rebased", feedback)
+                self.assertTrue((project / "Candidate.lean").is_file())
+                self.assertTrue((project / "Canonical.lean").is_file())
+            finally:
+                os.chdir(original)
+
     def test_parallel_same_file_leaf_additions_are_union_integrated(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
@@ -388,12 +457,26 @@ class WorktreeTests(unittest.TestCase):
                     git(worktree, "commit", "-m", f"feat: prove same-file leaf {number}")
                     heads.append(runtime._git_head(worktree))
 
-                first = runtime._integrate_candidate(
-                    worktrees[0], bases[0], heads[0]
+                subprocess.run(
+                    ["git", "config", "--unset-all", "user.name"],
+                    cwd=project,
+                    check=True,
                 )
-                second = runtime._integrate_candidate(
-                    worktrees[1], bases[1], heads[1]
+                subprocess.run(
+                    ["git", "config", "--unset-all", "user.email"],
+                    cwd=project,
+                    check=True,
                 )
+                with patch.dict(
+                    os.environ,
+                    {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"},
+                ):
+                    first = runtime._integrate_candidate(
+                        worktrees[0], bases[0], heads[0]
+                    )
+                    second = runtime._integrate_candidate(
+                        worktrees[1], bases[1], heads[1]
+                    )
 
                 self.assertTrue(first[0], first)
                 self.assertTrue(second[0], second)
