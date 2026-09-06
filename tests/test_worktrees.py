@@ -673,6 +673,69 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_empty_cherry_pick_after_lean_union_is_accepted(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "empty_union_problem"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text("theorem value : Nat := 0\n")
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize empty-union fixture")
+
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                )
+                runtime = Runtime(None, "empty-union fixture", config, {})
+                worktree = runtime._node_worktree(
+                    NodeRecord(
+                        id="root.union_duplicate-a1",
+                        title="Union duplicate",
+                        statement="True",
+                        attempts=1,
+                    )
+                )
+                (worktree / "Submission.lean").write_text(
+                    "theorem value : Nat := 1\n"
+                )
+                git(worktree, "add", "Submission.lean")
+                git(worktree, "commit", "-m", "feat: candidate value")
+                candidate = runtime._git_head(worktree)
+
+                (project / "Submission.lean").write_text(
+                    "theorem value : Nat := 2\n"
+                )
+                git(project, "add", "Submission.lean")
+                git(project, "commit", "-m", "feat: canonical value")
+
+                def keep_canonical(integration: Path) -> tuple[bool, str]:
+                    git(integration, "checkout", "--ours", "Submission.lean")
+                    git(integration, "add", "Submission.lean")
+                    return True, "kept already-integrated canonical Lean source"
+
+                with patch.object(
+                    runtime, "_union_lean_conflicts", side_effect=keep_canonical
+                ):
+                    applied, unioned, feedback = runtime._apply_candidate_commits(
+                        project, [candidate]
+                    )
+
+                self.assertTrue(applied, feedback)
+                self.assertTrue(unioned)
+                self.assertEqual(
+                    (project / "Submission.lean").read_text(),
+                    "theorem value : Nat := 2\n",
+                )
+                self.assertTrue(runtime._git_clean(project))
+            finally:
+                os.chdir(original)
+
     def test_parallel_same_file_leaf_additions_are_union_integrated(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
