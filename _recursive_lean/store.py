@@ -126,9 +126,14 @@ class Store:
                 self.root / "dag.json",
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             )
-            mermaid = ["flowchart TD"]
+            mermaid = [
+                "flowchart TD",
+                '  legend["Solid edge: decomposition child<br/>'
+                "Dashed edge: proof prerequisite<br/>"
+                'Scheduler follows prerequisite readiness"]',
+            ]
             for record in ordered:
-                label = self._label(record)
+                label = self._label(record, self._scheduling(record))
                 mermaid.append(f'  {self._mermaid_id(record.id)}["{label}"]')
             for record in ordered:
                 if record.parent:
@@ -151,15 +156,19 @@ class Store:
                 diagram.rstrip(),
                 "```",
                 "",
-                "| Node | Depth | Status | Theorem | Message |",
-                "| --- | ---: | --- | --- | --- |",
+                "| Node | Depth | Status | Scheduling | Theorem | Message |",
+                "| --- | ---: | --- | --- | --- | --- |",
             ]
             rows.extend(
                 (
-                    "| {node} | {depth} | {status} | {theorem} | {message} |".format(
+                    (
+                        "| {node} | {depth} | {status} | {scheduling} | "
+                        "{theorem} | {message} |"
+                    ).format(
                         node=self._cell(record.id),
                         depth=record.depth,
                         status=record.status,
+                        scheduling=self._cell(self._scheduling(record)),
                         theorem=self._cell(record.lean_name or "—"),
                         message=self._cell(record.message or "—"),
                     )
@@ -186,6 +195,11 @@ class Store:
 - Recursion depth: {node.depth}
 - Parent: `{node.parent or "none"}`
 - Lean source: `{theorem.lean_file}`
+- Isolated proof worktree: `{node.worktree or "not recorded"}`
+- Proof branch: `{node.proof_branch or "not recorded"}`
+- Proof base commit: `{node.proof_base_commit or "not recorded"}`
+- Reviewed candidate commit: `{node.candidate_commit or "not recorded"}`
+- Integrated problem commit: `{node.integrated_commit or "not recorded"}`
 - Updated: {now()}
 
 ## Statement
@@ -238,7 +252,29 @@ class Store:
     def _cell(value: str) -> str:
         return value.replace("|", "\\|").replace("\n", " ")
 
+    def _scheduling(self, record: NodeRecord) -> str:
+        """Explain decomposition shape separately from dependency readiness."""
+        shape = "decomposition leaf" if not record.children else "decomposed node"
+        blocked = [
+            dependency
+            for dependency in record.depends_on
+            if dependency in self.nodes and self.nodes[dependency].status != "proved"
+        ]
+        if blocked:
+            return f"{shape}; blocked by: {', '.join(blocked)}"
+        unfinished_children = [
+            child
+            for child in record.children
+            if child in self.nodes and self.nodes[child].status != "proved"
+        ]
+        if unfinished_children:
+            return f"{shape}; waiting for {len(unfinished_children)} child theorem(s)"
+        if record.status == "proved":
+            return f"{shape}; proved"
+        return f"{shape}; dependency-ready"
+
     @staticmethod
-    def _label(record: NodeRecord) -> str:
+    def _label(record: NodeRecord, scheduling: str) -> str:
         compact = record.title.replace('"', "'").replace("\n", " ")[:46]
-        return f"{record.id}\\n{compact}\\n[{record.status}]"
+        compact_schedule = scheduling.replace('"', "'")[:84]
+        return f"{record.id}\\n{compact}\\n[{record.status}]\\n{compact_schedule}"

@@ -25,9 +25,13 @@ On resume, the scheduler scans the whole existing DAG and launches every depende
 frontier node into one shared pool. It refills the pool whenever any node completes, so a newly
 unblocked branch does not wait for an unrelated slow worker. Fresh decompositions likewise
 launch every zero-indegree sibling in the first topological wave. Planning, natural-proof,
-review, and decomposition work runs concurrently up to `max_parallel_children`; Lean edits,
-Git commits, comparator runs, and Lean review are serialized inside a repository so every
-comparator sees a stable candidate snapshot.
+review, decomposition, Lean RLCR, comparator runs, and Lean review all run concurrently up to
+`max_parallel_children`. Every formalizing node receives its own named Git branch and worktree,
+and its official RLCR invocation runs in a separate process whose real working directory is that
+worktree. Source edits, Humanize state, and comparator scratch files therefore cannot collide.
+Only integration of fully reviewed histories is serialized. If parallel histories edited the
+same Lean file, the controller preserves both changes in an integration worktree and requires
+another comparator pass before advancing the problem branch.
 
 ## Requirements
 
@@ -98,6 +102,11 @@ controller comparator and the fresh reviewer's independent rerun; publication do
 the root theorem or the rest of the problem. Pages include the natural proof, frozen scaffold,
 Lean source, recursion level, and comparator evidence.
 
+The Mermaid diagram deliberately contains two edge types. A solid edge is only the decomposition
+tree (parent problem to child problem); a dashed edge is a proof prerequisite. A node can therefore
+be a decomposition leaf while still being dependency-blocked. The node label and status table say
+`dependency-ready` or list the exact blocking prerequisite; scheduling follows the dashed edges.
+
 ## Review gates
 
 - Direct planning performs an input relevance check and one pre-candidate analysis. It skips
@@ -118,8 +127,12 @@ Lean source, recursion level, and comparator evidence.
 On resume, the scheduler scans the complete persisted DAG. Every node whose dependencies are
 already proved enters the global frontier together, up to `max_parallel_children`. Completing a
 node immediately unlocks and launches newly ready dependants. Planning, natural-language proof,
-and decomposition can run concurrently; source edits, Git operations, comparator runs, and Lean
-review are serialized inside one shared repository to keep validation snapshots stable.
+decomposition, Lean implementation, and both comparator passes can run concurrently. Each node's
+Git worktree retains its proof history and exact reviewed candidate commit. The controller briefly
+serializes integration of accepted commits into the problem branch. Same-file reconciliations are
+performed in a separate integration worktree and comparator-checked before the branch advances.
+Dependency-blocked nodes remain queued until their prerequisite theorem commits have been
+integrated.
 
 ## Safety and stopping
 

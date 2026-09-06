@@ -7,7 +7,7 @@ from typing import Annotated, Any, NamedTuple
 from _recursive_lean.runtime import Runtime
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from hmz.flows import Agent, Moment, flow
+from hmz.flows import Agent, Moment, flow, load
 
 MIN_RECURSIVE_NODES = 3
 
@@ -158,6 +158,27 @@ class Config(BaseModel):
         return self
 
 
+class WorktreeRlcrConfig(BaseModel):
+    """The official RLCR settings forwarded by an isolated node process."""
+
+    model_config = {"extra": "forbid", "frozen": True}
+
+    plan_file: str = Field(description="absolute immutable implementation plan path")
+    max: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description="maximum official RLCR implementation/review rounds",
+    )
+    track_plan_file: bool = False
+    push_every_round: bool = False
+    skip_impl: bool = False
+    skip_quiz: bool = True
+    privacy: bool = True
+    agent_teams: bool = False
+    claude_answer_codex: bool = True
+
+
 @flow(
     resumable=True,
     about="Recursive Lean proving with RLCR plans, comparator gates, a live DAG, and a wiki",
@@ -172,4 +193,26 @@ def run(
     Runtime(agents, task, config or Config(), state).execute()
 
 
-__all__ = ["Agents", "Config", "run"]
+@flow(
+    name="worktree-rlcr",
+    resumable=True,
+    selectable=False,
+    about="Run official RLCR in one node worktree while inheriting recursive Lean rules",
+)
+def worktree_rlcr(
+    agents: Agents,
+    task: str,
+    config: WorktreeRlcrConfig,
+    state: dict[str, Any] | None = None,
+) -> None:
+    """Process-isolated bridge whose actual cwd is the formalizing node worktree."""
+    load("official/humanize1:rlcr", inherit_skills=True)(
+        agents,
+        task,
+        config.model_dump(),
+    )
+    if state is not None:
+        state.clear()
+
+
+__all__ = ["Agents", "Config", "WorktreeRlcrConfig", "run", "worktree_rlcr"]

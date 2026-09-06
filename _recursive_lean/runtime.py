@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shlex
 import shutil
 import subprocess
+import tempfile
 import threading
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +45,68 @@ if TYPE_CHECKING:
 
 GEN_PLAN = "official/humanize1:gen-plan"
 RLCR = "official/humanize1:rlcr"
+WORKTREE_RLCR = f"{Path(__file__).resolve().parent.parent}:worktree-rlcr"
+
+
+class _WorkspaceAgent:
+    """Run every session cloned from one Humanize agent in a fixed worktree."""
+
+    def __init__(self, agent: Any, cwd: Path) -> None:
+        self._agent = agent
+        self._cwd = cwd
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._agent, name)
+
+    @property
+    def epic(self) -> Any:
+        return self._agent.epic
+
+    @epic.setter
+    def epic(self, value: Any) -> None:
+        self._agent.epic = value
+
+    @property
+    def effort(self) -> str:
+        return self._agent.effort
+
+    @effort.setter
+    def effort(self, value: str) -> None:
+        self._agent.effort = value
+
+    def __call__(
+        self,
+        prompt: str,
+        *,
+        suppress: bool = False,
+        schema: Any = None,
+        cwd: str | os.PathLike[str] | None = None,
+    ) -> Any:
+        del cwd
+        session = self.new()
+        if schema is None:
+            return session(prompt, suppress=suppress)
+        return session(prompt, suppress=suppress, schema=schema)
+
+    def new(self, cwd: str | os.PathLike[str] | None = None) -> Any:
+        del cwd
+        return self._agent.new(self._cwd)
+
+    def clone(
+        self,
+        *,
+        config: Any = None,
+        name: str | None = None,
+        skills: Any = None,
+    ) -> _WorkspaceAgent:
+        arguments: dict[str, Any] = {}
+        if config is not None:
+            arguments["config"] = config
+        if name is not None:
+            arguments["name"] = name
+        if skills is not None:
+            arguments["skills"] = skills
+        return _WorkspaceAgent(self._agent.clone(**arguments), self._cwd)
 
 
 class Runtime:
@@ -59,10 +124,11 @@ class Runtime:
         self.config = config
         self.state = state if state is not None else {}
         self.project = Path.cwd().resolve()
-        # Natural-proof work may run concurrently, but every source/Git/comparator
-        # transition in this repository must observe one stable candidate snapshot.
+        # The graph and short integration operations are synchronized. Lean workers and
+        # both comparator passes run in per-node Git worktrees, so every ready leaf may
+        # formalize concurrently without sharing source, HEAD, or comparator scratch files.
         self._graph_lock = threading.RLock()
-        self._lean_lock = threading.Lock()
+        self._integration_lock = threading.Lock()
         self._revision_lock = threading.Lock()
         self.run_root = self._run_root()
         self.store = Store(
@@ -535,40 +601,55 @@ class Runtime:
         )
         results: dict[str, SolveResult] = {}
         by_key = {one.key: one for one in decomposition.subproblems}
-        for wave in self._topological_waves(decomposition.subproblems):
-            runnable: list[str] = []
-            for key in wave:
-                child = by_key[key]
-                dependency_failure = next(
-                    (
-                        results[dependency]
-                        for dependency in child.depends_on
-                        if not results[dependency].ok
-                    ),
-                    None,
-                )
-                if dependency_failure is not None:
-                    result = SolveResult(
-                        ok=False,
-                        node_id=made[key].id,
-                        feedback=f"dependency {dependency_failure.node_id} failed",
+        pending = set(by_key)
+        workers = min(self.config.max_parallel_children, max(1, len(pending)))
+        with ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix=f"recursive-{slug(parent.id)}",
+        ) as executor:
+            futures: dict[Any, str] = {}
+            while pending or futures:
+                progressed = False
+                for key in sorted(tuple(pending)):
+                    child = by_key[key]
+                    dependency_failure = next(
+                        (
+                            results[dependency]
+                            for dependency in child.depends_on
+                            if dependency in results and not results[dependency].ok
+                        ),
+                        None,
                     )
-                    self.store.update(made[key].id, "failed", result.feedback)
-                    results[key] = result
-                else:
-                    runnable.append(key)
-            if not runnable:
-                continue
-            workers = min(self.config.max_parallel_children, len(runnable))
-            with ThreadPoolExecutor(
-                max_workers=workers,
-                thread_name_prefix=f"recursive-{slug(parent.id)}",
-            ) as executor:
-                futures = {
-                    executor.submit(self._solve, made[key]): key for key in runnable
-                }
-                for future in as_completed(futures):
-                    key = futures[future]
+                    if dependency_failure is not None:
+                        result = SolveResult(
+                            ok=False,
+                            node_id=made[key].id,
+                            feedback=f"dependency {dependency_failure.node_id} failed",
+                        )
+                        self.store.update(made[key].id, "failed", result.feedback)
+                        results[key] = result
+                        pending.remove(key)
+                        progressed = True
+                        continue
+                    if all(dependency in results for dependency in child.depends_on):
+                        pending.remove(key)
+                        futures[executor.submit(self._solve, made[key])] = key
+                        progressed = True
+                if not futures:
+                    if pending and not progressed:
+                        for key in sorted(pending):
+                            result = SolveResult(
+                                ok=False,
+                                node_id=made[key].id,
+                                feedback="no dependency-ready node in child DAG",
+                            )
+                            self.store.update(made[key].id, "failed", result.feedback)
+                            results[key] = result
+                        pending.clear()
+                    continue
+                done, _ = wait(tuple(futures), return_when=FIRST_COMPLETED)
+                for future in done:
+                    key = futures.pop(future)
                     try:
                         results[key] = future.result()
                     except Exception as error:  # noqa: BLE001
@@ -738,7 +819,7 @@ class Runtime:
         natural: NaturalProof,
         children: list[SolveResult],
     ) -> SolveResult:
-        """Run official RLCR, the machine comparator, and a fresh Lean reviewer."""
+        """Run RLCR and both reviews in an isolated node worktree, then integrate."""
         natural_path = self.project / node.natural_proof
         child_pages = [
             theorem for child in children if child.ok for theorem in child.theorems
@@ -757,136 +838,168 @@ class Runtime:
             natural_path=natural_path,
             children=child_text,
         )
-        if not self._lean_lock.acquire(blocking=False):
-            self.store.update(
-                node.id,
-                "waiting-lean",
-                "dependency-ready; waiting for the repository Lean/Git lock",
-            )
-            self._lean_lock.acquire()
         try:
-            before = self._git_head()
-            self.store.update(
-                node.id, "rlcr-lean", "official humanize1:rlcr formalization"
+            worktree = self._node_worktree(node)
+        except RuntimeError as error:
+            return SolveResult(ok=False, node_id=node.id, feedback=str(error))
+        before = node.proof_base_commit or self._git_head(worktree)
+        self.store.update(
+            node.id,
+            "rlcr-lean",
+            f"isolated humanize1:rlcr formalization in {worktree}",
+            worktree=str(worktree),
+            proof_branch=self._node_branch(node),
+            proof_base_commit=before,
+        )
+        task = RLCR_LEAN_TASK.format(
+            node_id=node.id,
+            plan_path=plan_path,
+            natural_path=natural_path,
+            statement=node.statement,
+            lean_statement=node.lean_statement
+            or "Root declarations are fixed by Challenge.lean and the official comparator.",
+            lean_name=node.lean_name or "choose a descriptive theorem name",
+            lean_target=self.config.lean_target
+            or "infer the repository's correct target .lean file",
+            children=child_text,
+            comparator_command=self._review_command(node, []),
+            comparator_success=self.config.comparator_success,
+        )
+        try:
+            rlcr_ok, rlcr_log = self._run_rlcr_process(node, worktree, plan_path, task)
+        except OSError as error:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=f"could not launch isolated humanize1:rlcr: {error}",
             )
-            try:
-                formal_agents = (
-                    self.agents.worker.clone(),
-                    self.agents.reviewer.clone(),
-                )
-                load(RLCR, inherit_skills=True)(
-                    formal_agents,
-                    RLCR_LEAN_TASK.format(
-                        node_id=node.id,
-                        plan_path=plan_path.relative_to(self.project),
-                        natural_path=natural_path.relative_to(self.project),
-                        statement=node.statement,
-                        lean_statement=node.lean_statement
-                        or "Root declarations are fixed by Challenge.lean and the official comparator.",
-                        lean_name=node.lean_name or "choose a descriptive theorem name",
-                        lean_target=self.config.lean_target
-                        or "infer the repository's correct target .lean file",
-                        children=child_text,
-                        comparator_command=self._render_command(node, []),
-                        comparator_success=self.config.comparator_success,
-                    ),
-                    {
-                        "plan_file": str(plan_path.relative_to(self.project)),
-                        "max": self.config.rlcr_rounds,
-                        "track_plan_file": False,
-                        "push_every_round": False,
-                        "skip_impl": False,
-                        "skip_quiz": True,
-                        "privacy": True,
-                        "agent_teams": False,
-                        "claude_answer_codex": True,
-                    },
-                )
-            except Stopped as error:
-                return SolveResult(
-                    ok=False,
-                    node_id=node.id,
-                    feedback=f"humanize1:rlcr stopped: {error}",
-                )
-            except Exception as error:  # noqa: BLE001
-                return SolveResult(
-                    ok=False,
-                    node_id=node.id,
-                    feedback=f"humanize1:rlcr failed: {error}",
-                )
-            lean_files = self._lean_files(before, self._git_head())
-            if not lean_files:
-                return SolveResult(
-                    ok=False,
-                    node_id=node.id,
-                    feedback="RLCR completed without an identifiable Lean target",
-                )
-            self.store.update(
-                node.id,
-                "comparing",
-                "running independent machine comparator",
-                lean_files=lean_files,
+        if not rlcr_ok:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=f"isolated humanize1:rlcr failed; see {rlcr_log}",
             )
-            passed, log_path, log = self._compare(node, lean_files)
-            if not passed:
-                self.store.update(
-                    node.id,
-                    "natural-proof",
-                    "comparator rejected the theorem; revise latest NL proof",
-                )
-                return SolveResult(
-                    ok=False,
-                    node_id=node.id,
-                    feedback=f"Comparator failed; see {log_path.relative_to(self.project)}",
-                )
-            self.store.update(node.id, "lean-review", "fresh reviewer reruns comparator")
-            audit = self.agents.reviewer.clone()(
-                LEAN_AUDIT.format(
-                    node_id=node.id,
-                    statement=node.statement,
-                    lean_statement=node.lean_statement
-                    or "Root declarations are fixed by Challenge.lean and the official comparator.",
-                    lean_files="\n".join(f"- {one}" for one in lean_files),
-                    comparator_command=self._render_command(node, lean_files),
-                    comparator_success=self.config.comparator_success,
-                    comparator_log=log[-12000:],
-                ),
-                suppress=True,
-                schema=LeanAudit,
+        after = self._git_head(worktree)
+        if not self._git_clean(worktree):
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=f"RLCR left uncommitted participant changes in {worktree}",
             )
-            if audit is not None:
-                audit_version = self._next_json_version(node, "lean-audit")
-                atomic_text(
-                    self._node_dir(node) / f"lean-audit-v{audit_version}.json",
-                    audit.model_dump_json(indent=2) + "\n",
-                )
-            if audit is None or not audit.passed:
-                return SolveResult(
-                    ok=False,
-                    node_id=node.id,
-                    feedback=self._lean_feedback(audit),
-                )
-            plan = accepted_plan.read_text(encoding="utf-8")
-            pages: list[str] = []
-            for theorem in audit.theorems:
-                page = self.store.publish(
-                    node,
-                    theorem,
-                    plan=plan,
-                    natural=natural.proof,
-                    comparator_log=log,
-                )
-                pages.append(str(page.relative_to(self.project)))
-            names = [one.name for one in audit.theorems]
+        lean_files = self._lean_files(before, after, worktree)
+        if not lean_files:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback="RLCR completed without an identifiable Lean target",
+            )
+        self.store.update(
+            node.id,
+            "comparing",
+            f"running independent machine comparator in {worktree}",
+            lean_files=lean_files,
+        )
+        passed, log_path, log = self._compare(node, lean_files, worktree)
+        if not passed:
             self.store.update(
                 node.id,
-                "proved",
-                f"comparator + reviewer passed; wiki: {', '.join(pages)}",
-                theorems=names,
+                "natural-proof",
+                "comparator rejected the theorem; revise latest NL proof",
             )
-            return SolveResult(ok=True, node_id=node.id, theorems=audit.theorems)
-        finally:
-            self._lean_lock.release()
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=f"Comparator failed; see {log_path.relative_to(self.project)}",
+            )
+        self.store.update(
+            node.id,
+            "lean-review",
+            f"fresh reviewer reruns comparator in {worktree}",
+        )
+        audit = _WorkspaceAgent(self.agents.reviewer.clone(), worktree)(
+            LEAN_AUDIT.format(
+                node_id=node.id,
+                statement=node.statement,
+                lean_statement=node.lean_statement
+                or "Root declarations are fixed by Challenge.lean and the official comparator.",
+                lean_files="\n".join(f"- {one}" for one in lean_files),
+                comparator_command=self._review_command(node, lean_files),
+                comparator_success=self.config.comparator_success,
+                comparator_log=log[-12000:],
+            ),
+            suppress=True,
+            schema=LeanAudit,
+        )
+        if audit is not None:
+            audit_version = self._next_json_version(node, "lean-audit")
+            atomic_text(
+                self._node_dir(node) / f"lean-audit-v{audit_version}.json",
+                audit.model_dump_json(indent=2) + "\n",
+            )
+        if audit is None or not audit.passed:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=self._lean_feedback(audit),
+            )
+        self.store.update(
+            node.id,
+            "integrating",
+            f"all isolated gates passed; integrating commit {after[:12]}",
+            candidate_commit=after,
+        )
+        integrated, integration_feedback = self._integrate_candidate(
+            worktree,
+            before,
+            after,
+            node=node,
+            lean_files=lean_files,
+        )
+        if not integrated:
+            self.store.update(
+                node.id,
+                "natural-proof",
+                "integration recheck failed; retain old proof branch and retry from "
+                f"latest NL proof: {integration_feedback}",
+                worktree="",
+                proof_branch="",
+                proof_base_commit="",
+                candidate_commit="",
+            )
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=integration_feedback,
+            )
+        integrated_head = self._git_head(self.project)
+        self.store.update(
+            node.id,
+            "integrating",
+            integration_feedback,
+            candidate_commit=after,
+            integrated_commit=integrated_head,
+        )
+        plan = accepted_plan.read_text(encoding="utf-8")
+        pages: list[str] = []
+        for theorem in audit.theorems:
+            page = self.store.publish(
+                node,
+                theorem,
+                plan=plan,
+                natural=natural.proof,
+                comparator_log=log,
+            )
+            pages.append(str(page.relative_to(self.project)))
+        names = [one.name for one in audit.theorems]
+        self.store.update(
+            node.id,
+            "proved",
+            f"comparator + reviewer passed; wiki: {', '.join(pages)}",
+            theorems=names,
+            candidate_commit=after,
+            integrated_commit=integrated_head,
+        )
+        return SolveResult(ok=True, node_id=node.id, theorems=audit.theorems)
 
     def _revise_parent(self, child: NodeRecord, failure: str) -> None:
         """Route an incorrect child theorem into the parent's NL-proof loop."""
@@ -903,7 +1016,12 @@ class Runtime:
             )
 
     def _compare(
-        self, node: NodeRecord, lean_files: list[str]
+        self,
+        node: NodeRecord,
+        lean_files: list[str],
+        cwd: Path | None = None,
+        *,
+        label: str = "",
     ) -> tuple[bool, Path, str]:
         """Run the comparator without a shell and require both exit zero and its marker."""
         rendered = self._render_command(node, lean_files)
@@ -919,7 +1037,7 @@ class Runtime:
         try:
             completed = subprocess.run(
                 argv,
-                cwd=self.project,
+                cwd=cwd or self.project,
                 env=environment,
                 capture_output=True,
                 text=True,
@@ -938,17 +1056,19 @@ class Runtime:
         except (OSError, subprocess.TimeoutExpired) as error:
             log = f"command: {rendered}\ncomparator execution failed: {error}\n"
             passed = False
-        path = self._node_dir(node) / f"comparator-v{node.attempts}.log"
+        suffix = f"-{slug(label)}" if label else ""
+        path = self._node_dir(node) / f"comparator-v{node.attempts}{suffix}.log"
         atomic_text(path, log)
         return passed, path, log
 
-    def _lean_files(self, before: str, after: str) -> list[str]:
+    def _lean_files(self, before: str, after: str, cwd: Path | None = None) -> list[str]:
         """Identify Lean files changed by this node, plus an explicitly configured target."""
+        workspace = cwd or self.project
         found: set[str] = set()
         if before and after:
             completed = subprocess.run(
                 ["git", "diff", "--name-only", f"{before}..{after}", "--", "*.lean"],
-                cwd=self.project,
+                cwd=workspace,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -959,10 +1079,436 @@ class Runtime:
                 )
         if (
             self.config.lean_target
-            and (self.project / self.config.lean_target).is_file()
+            and (workspace / self.config.lean_target).is_file()
         ):
             found.add(self.config.lean_target)
         return sorted(found)
+
+    def _review_command(self, node: NodeRecord, lean_files: list[str]) -> str:
+        """Render the comparator with explicit controller paths for isolated worktrees."""
+        environment = (
+            f"HUMANIZE_RUN_DIR={shlex.quote(str(self.run_root))} "
+            f"HUMANIZE_WIKI_DIR={shlex.quote(str(self.store.wiki))}"
+        )
+        return f"env {environment} {self._render_command(node, lean_files)}"
+
+    def _run_rlcr_process(
+        self, node: NodeRecord, worktree: Path, plan_path: Path, task: str
+    ) -> tuple[bool, Path]:
+        """Run official RLCR in a process whose real cwd is the node worktree.
+
+        Humanize's RLCR intentionally derives its Git root from ``Path.cwd()``. Changing
+        Python's cwd in a worker thread would race every other leaf, so process isolation is
+        required in addition to binding the Codex sessions to the worktree.
+        """
+        node_dir = self._node_dir(node)
+        config_path = node_dir / f"rlcr-config-v{node.attempts}.json"
+        atomic_text(
+            config_path,
+            json.dumps(
+                {
+                    "plan_file": str(plan_path),
+                    "max": self.config.rlcr_rounds,
+                    "track_plan_file": False,
+                    "push_every_round": False,
+                    "skip_impl": False,
+                    "skip_quiz": True,
+                    "privacy": True,
+                    "agent_teams": False,
+                    "claude_answer_codex": True,
+                },
+                indent=2,
+            )
+            + "\n",
+        )
+        executable = shutil.which("hmz")
+        if executable is None:
+            raise OSError("hmz executable not found")
+        command = [
+            executable,
+            "exec",
+            "-f",
+            WORKTREE_RLCR,
+            "-c",
+            str(config_path),
+            "-a",
+            self._agent_spec(self.agents.worker),
+            "-a",
+            self._agent_spec(self.agents.reviewer),
+            task,
+        ]
+        log_path = node_dir / f"rlcr-process-v{node.attempts}.log"
+        with log_path.open("w", encoding="utf-8") as output:
+            completed = subprocess.run(
+                command,
+                cwd=worktree,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+        return completed.returncode == 0, log_path
+
+    @staticmethod
+    def _agent_spec(agent: Any) -> str:
+        """Serialize a parent Humanize agent for an isolated ``hmz exec`` child."""
+        config = agent.config
+        fields = [
+            f"cli={agent.backend}",
+            f"model={config.model}",
+            f"effort={config.effort}",
+            f"service_tier={config.service_tier}",
+            f"permission={config.permission}",
+            f"web_search={'on' if config.web_search else 'off'}",
+        ]
+        if config.provider:
+            fields.append(f"provider={config.provider}")
+        fields.extend(
+            f"config.{key}={value}" for key, value in getattr(config, "overrides", ())
+        )
+        return ",".join(fields)
+
+    def _node_worktree(self, node: NodeRecord) -> Path:
+        """Create or reuse a durable Git branch and worktree for one node attempt."""
+        recorded = Path(node.worktree) if node.worktree else None
+        if recorded is not None and self._git_toplevel(recorded) == recorded:
+            return recorded
+        path = (
+            self.project.parent
+            / ".recursive-lean-node-worktrees"
+            / self.run_root.name
+            / slug(node.id)
+            / f"attempt-{max(node.attempts, 1)}"
+            / self.project.name
+        )
+        if self._git_toplevel(path) == path:
+            return path
+        if path.exists() and any(path.iterdir()):
+            raise RuntimeError(f"node worktree path exists but is not a Git worktree: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        branch = self._node_branch(node)
+        base = self._git_head(self.project)
+        detail = "unknown Git error"
+        for retry in range(6):
+            with self._integration_lock:
+                if self._git_toplevel(path) == path:
+                    break
+                exists = subprocess.run(
+                    [
+                        "git",
+                        "show-ref",
+                        "--verify",
+                        "--quiet",
+                        f"refs/heads/{branch}",
+                    ],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).returncode == 0
+                arguments = (
+                    ["git", "worktree", "add", str(path), branch]
+                    if exists
+                    else [
+                        "git",
+                        "worktree",
+                        "add",
+                        "-b",
+                        branch,
+                        str(path),
+                        "HEAD",
+                    ]
+                )
+                completed = subprocess.run(
+                    arguments,
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            if completed.returncode == 0:
+                break
+            detail = (completed.stderr or completed.stdout).strip()
+            # Twelve problem supervisors can share one underlying Git repository. Git's
+            # own ref/worktree locks are authoritative; retry their brief contention.
+            time.sleep(0.2 * (retry + 1))
+        if self._git_toplevel(path) != path:
+            raise RuntimeError(f"could not create isolated node worktree: {detail}")
+        node.worktree = str(path)
+        node.proof_branch = branch
+        node.proof_base_commit = base
+        self._link_lake_packages(path)
+        return path
+
+    def _link_lake_packages(self, path: Path) -> None:
+        """Share the immutable dependency checkout when Git excludes the link."""
+        packages = self.project / ".lake" / "packages"
+        linked = path / ".lake" / "packages"
+        ignored = subprocess.run(
+            ["git", "check-ignore", "--quiet", ".lake/packages"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if packages.is_dir() and not linked.exists() and ignored.returncode == 0:
+            linked.parent.mkdir(parents=True, exist_ok=True)
+            linked.symlink_to(packages, target_is_directory=True)
+
+    def _node_branch(self, node: NodeRecord) -> str:
+        """Return the stable Git branch name retaining one node attempt's proof."""
+        if node.proof_branch:
+            return node.proof_branch
+        return (
+            "humanize-recursive/"
+            f"{slug(self.project.name)}/{slug(self.run_root.name)}/"
+            f"{slug(node.id)}-a{max(node.attempts, 1)}"
+        )
+
+    def _integrate_candidate(
+        self,
+        worktree: Path,
+        before: str,
+        after: str,
+        *,
+        node: NodeRecord | None = None,
+        lean_files: list[str] | None = None,
+    ) -> tuple[bool, str]:
+        """Integrate one reviewed history, reconciling parallel sibling bases safely."""
+        if not after:
+            return False, f"isolated worktree has no Git HEAD: {worktree}"
+        if before == after:
+            return True, "the reviewed theorem was already present at the worktree base"
+        listed = subprocess.run(
+            ["git", "rev-list", "--reverse", f"{before}..{after}"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        commits = [one for one in listed.stdout.splitlines() if one]
+        if listed.returncode or not commits:
+            return False, f"could not enumerate reviewed commits {before}..{after}"
+        with self._integration_lock:
+            if not self._git_clean(self.project):
+                return False, "problem integration worktree is not clean"
+            canonical = self._git_head(self.project)
+            if canonical == before:
+                merged = subprocess.run(
+                    ["git", "merge", "--ff-only", after],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if merged.returncode:
+                    detail = (merged.stderr or merged.stdout).strip()
+                    return False, f"could not fast-forward reviewed node history: {detail}"
+                return True, f"fast-forwarded {len(commits)} reviewed commit(s)"
+
+            scratch_parent = self.project.parent / ".recursive-lean-integration-worktrees"
+            scratch_parent.mkdir(parents=True, exist_ok=True)
+            temporary = Path(
+                tempfile.mkdtemp(
+                    prefix=f"{slug(node.id) if node else 'node'}-",
+                    dir=scratch_parent,
+                )
+            )
+            integration = temporary / self.project.name
+            added = subprocess.run(
+                ["git", "worktree", "add", "--detach", str(integration), canonical],
+                cwd=self.project,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if added.returncode:
+                detail = (added.stderr or added.stdout).strip()
+                try:
+                    temporary.rmdir()
+                except OSError:
+                    pass
+                return False, f"could not create integration recheck worktree: {detail}"
+            try:
+                self._link_lake_packages(integration)
+                applied, unioned, detail = self._apply_candidate_commits(
+                    integration, commits
+                )
+                if not applied:
+                    return False, detail
+                if node is not None:
+                    passed, log_path, _ = self._compare(
+                        node,
+                        lean_files or [],
+                        integration,
+                        label="integration",
+                    )
+                    if not passed:
+                        return (
+                            False,
+                            "combined parallel history failed its integration comparator; "
+                            f"see {log_path.relative_to(self.project)}",
+                        )
+                integration_head = self._git_head(integration)
+                merged = subprocess.run(
+                    ["git", "merge", "--ff-only", integration_head],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if merged.returncode:
+                    detail = (merged.stderr or merged.stdout).strip()
+                    return False, f"could not fast-forward reconciled node history: {detail}"
+                method = "union-reconciled" if unioned else "rebased"
+                return True, f"{method} and integrated {len(commits)} reviewed commit(s)"
+            finally:
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(integration)],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                try:
+                    temporary.rmdir()
+                except OSError:
+                    pass
+
+    def _apply_candidate_commits(
+        self, integration: Path, commits: list[str]
+    ) -> tuple[bool, bool, str]:
+        """Cherry-pick reviewed commits, unioning only ordinary tracked Lean conflicts."""
+        unioned = False
+        for commit in commits:
+            picked = subprocess.run(
+                ["git", "cherry-pick", commit],
+                cwd=integration,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if picked.returncode == 0:
+                continue
+            resolved, detail = self._union_lean_conflicts(integration)
+            if not resolved:
+                subprocess.run(
+                    ["git", "cherry-pick", "--abort"],
+                    cwd=integration,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                return False, unioned, (
+                    f"reviewed node commit {commit[:12]} could not be reconciled: {detail}"
+                )
+            unioned = True
+            continued = subprocess.run(
+                ["git", "-c", "core.editor=true", "cherry-pick", "--continue"],
+                cwd=integration,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if continued.returncode:
+                detail = (continued.stderr or continued.stdout).strip()
+                subprocess.run(
+                    ["git", "cherry-pick", "--abort"],
+                    cwd=integration,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                return False, unioned, f"could not commit reconciled Lean sources: {detail}"
+        return True, unioned, "candidate commits applied"
+
+    @staticmethod
+    def _union_lean_conflicts(integration: Path) -> tuple[bool, str]:
+        """Preserve both sides of same-file Lean additions for comparator rechecking."""
+        unmerged = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=U", "-z"],
+            cwd=integration,
+            capture_output=True,
+            check=False,
+        )
+        paths = [
+            one.decode("utf-8")
+            for one in unmerged.stdout.split(b"\0")
+            if one
+        ]
+        if unmerged.returncode or not paths:
+            return False, "Git reported no resolvable unmerged paths"
+        if any(not path.endswith(".lean") for path in paths):
+            return False, f"non-Lean conflict requires a new proof attempt: {paths}"
+        for relative in paths:
+            stages: list[bytes] = []
+            for stage in (2, 1, 3):
+                shown = subprocess.run(
+                    ["git", "show", f":{stage}:{relative}"],
+                    cwd=integration,
+                    capture_output=True,
+                    check=False,
+                )
+                if shown.returncode:
+                    return False, f"cannot read merge stage {stage} for {relative}"
+                stages.append(shown.stdout)
+            with tempfile.TemporaryDirectory(prefix="humanize-lean-union-") as held:
+                files = [Path(held) / name for name in ("ours", "base", "theirs")]
+                for path, content in zip(files, stages, strict=True):
+                    path.write_bytes(content)
+                merged = subprocess.run(
+                    [
+                        "git",
+                        "merge-file",
+                        "--union",
+                        "-p",
+                        str(files[0]),
+                        str(files[1]),
+                        str(files[2]),
+                    ],
+                    capture_output=True,
+                    check=False,
+                )
+            if merged.returncode < 0 or merged.returncode > 127:
+                return False, f"text union failed for {relative}"
+            target = (integration / relative).resolve()
+            if not target.is_relative_to(integration.resolve()):
+                return False, f"unsafe conflicted path: {relative}"
+            target.write_bytes(merged.stdout)
+            staged = subprocess.run(
+                ["git", "add", "--", relative],
+                cwd=integration,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if staged.returncode:
+                return False, f"could not stage reconciled Lean source {relative}"
+        return True, f"unioned {len(paths)} Lean source conflict(s)"
+
+    @staticmethod
+    def _git_toplevel(cwd: Path) -> Path | None:
+        if not cwd.is_dir():
+            return None
+        completed = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return Path(completed.stdout.strip()).resolve() if not completed.returncode else None
+
+    @staticmethod
+    def _git_clean(cwd: Path) -> bool:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return completed.returncode == 0 and not completed.stdout.strip()
 
     def _render_command(self, node: NodeRecord, lean_files: list[str]) -> str:
         """Fill documented comparator placeholders while refusing unknown ones."""
@@ -1048,8 +1594,8 @@ class Runtime:
 
 ## Immutable inputs
 
-- Full controller plan: `{accepted_plan.relative_to(self.project)}`
-- Accepted natural proof: `{natural_path.relative_to(self.project)}`
+- Full controller plan: `{accepted_plan}`
+- Accepted natural proof: `{natural_path}`
 - Declaration name: `{node.lean_name}`
 - Frozen child type: `{node.lean_statement or 'official root Challenge declarations'}`
 - Lean target: `{self.config.lean_target or 'infer the repository target'}`
@@ -1065,7 +1611,7 @@ Comparator-approved dependencies:
 2. Run warning-fatal Lean builds and inspect the complete source diff for placeholders,
    weakened statements, new axioms, unsafe mechanisms, or protected-file changes.
 3. Commit the candidate and require a clean worktree at that exact SHA.
-4. Run `{self._render_command(node, [])}` and require exit zero plus
+4. Run `{self._review_command(node, [])}` and require exit zero plus
    `{self.config.comparator_success}`.
 5. Return control to the recursive controller immediately.
 
@@ -1086,10 +1632,10 @@ not blockers for completion of this implementation-only plan.
             return Path(self.config.lean_target).stem
         return "main_theorem"
 
-    def _git_head(self) -> str:
+    def _git_head(self, cwd: Path | None = None) -> str:
         completed = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=self.project,
+            cwd=cwd or self.project,
             capture_output=True,
             text=True,
             check=False,
@@ -1257,21 +1803,3 @@ not blockers for completion of this implementation-only plan.
             for dependencies in items.values():
                 dependencies.difference_update(ready)
         return ordered
-
-    @staticmethod
-    def _topological_waves(subproblems: Iterable[Subproblem]) -> list[list[str]]:
-        """Return maximal dependency-ready layers for parallel activation."""
-        items = {one.key: set(one.depends_on) for one in subproblems}
-        waves: list[list[str]] = []
-        while items:
-            ready = sorted(
-                key for key, dependencies in items.items() if not dependencies
-            )
-            if not ready:
-                raise ValueError("subproblem dependency graph contains a cycle")
-            waves.append(ready)
-            for key in ready:
-                del items[key]
-            for dependencies in items.values():
-                dependencies.difference_update(ready)
-        return waves

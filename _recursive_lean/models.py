@@ -245,6 +245,7 @@ NodeStatus = Literal[
     "rlcr-lean",
     "comparing",
     "lean-review",
+    "integrating",
     "proved",
     "failed",
     "interrupted",
@@ -269,6 +270,11 @@ class NodeRecord(BaseModel):
     plan: str = ""
     natural_proof: str = ""
     lean_files: list[str] = Field(default_factory=list)
+    worktree: str = ""
+    proof_branch: str = ""
+    proof_base_commit: str = ""
+    candidate_commit: str = ""
+    integrated_commit: str = ""
     children: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     theorems: list[str] = Field(default_factory=list)
