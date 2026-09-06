@@ -31,7 +31,9 @@ and its official RLCR invocation runs in a separate process whose real working d
 worktree. Source edits, Humanize state, and comparator scratch files therefore cannot collide.
 Only integration of fully reviewed histories is serialized. If parallel histories edited the
 same Lean file, the controller preserves both changes in an integration worktree and requires
-another comparator pass before advancing the problem branch.
+another comparator pass before advancing the problem branch. Deep repository paths are mapped to
+a stable short checkout path under `/tmp/humanize-lean-worktrees`; the named Git branch retains the
+durable proof history even if that disposable checkout is later removed.
 
 ## Requirements
 

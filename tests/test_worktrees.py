@@ -184,6 +184,68 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_overlong_recorded_worktree_is_moved_to_short_path(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            deep = root
+            for number in range(3):
+                deep /= f"long-experiment-component-{number}-" + "x" * 36
+            project = deep / "short_problem"
+            project.mkdir(parents=True)
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text("theorem original : True := by trivial\n")
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize long-path fixture")
+
+            shortened: Path | None = None
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                )
+                runtime = Runtime(None, "long-path fixture", config, {})
+                node = NodeRecord(
+                    id="root.long_path_leaf-a1",
+                    title="Long path leaf",
+                    statement="True",
+                    attempts=1,
+                )
+                branch = runtime._node_branch(node)
+                old = (
+                    project.parent
+                    / ".recursive-lean-node-worktrees"
+                    / runtime.run_root.name
+                    / "long-path-leaf"
+                    / "attempt-1"
+                    / project.name
+                )
+                old.parent.mkdir(parents=True)
+                git(project, "worktree", "add", "-b", branch, str(old), "HEAD")
+                node.worktree = str(old)
+                node.proof_branch = branch
+                node.proof_base_commit = runtime._git_head(project)
+
+                shortened = runtime._node_worktree(node)
+
+                self.assertLessEqual(len(str(shortened)), 180)
+                self.assertEqual(shortened.name, project.name)
+                self.assertFalse(old.exists())
+                self.assertEqual(runtime._git_toplevel(shortened), shortened)
+            finally:
+                if shortened is not None and shortened.exists():
+                    subprocess.run(
+                        ["git", "worktree", "remove", "--force", str(shortened)],
+                        cwd=project,
+                        capture_output=True,
+                        check=False,
+                    )
+                os.chdir(original)
+
     def test_two_ready_leaf_histories_integrate_from_parallel_worktrees(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:

@@ -1171,17 +1171,36 @@ class Runtime:
     def _node_worktree(self, node: NodeRecord) -> Path:
         """Create or reuse a durable Git branch and worktree for one node attempt."""
         recorded = Path(node.worktree) if node.worktree else None
-        if recorded is not None and self._git_toplevel(recorded) == recorded:
-            return recorded
-        path = (
-            self.project.parent
-            / ".recursive-lean-node-worktrees"
-            / self.run_root.name
-            / slug(node.id)
-            / f"attempt-{max(node.attempts, 1)}"
-            / self.project.name
+        recorded_valid = (
+            recorded is not None and self._git_toplevel(recorded) == recorded
         )
+        if recorded_valid and len(str(recorded)) <= 180:
+            return recorded
+        path = self._node_worktree_path(node)
+        if recorded_valid:
+            if self._git_toplevel(path) == path:
+                node.worktree = str(path)
+                return path
+            if path.exists() and any(path.iterdir()):
+                raise RuntimeError(
+                    f"short node worktree path exists but is not a Git worktree: {path}"
+                )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with self._integration_lock:
+                moved = subprocess.run(
+                    ["git", "worktree", "move", str(recorded), str(path)],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            if moved.returncode:
+                detail = (moved.stderr or moved.stdout).strip()
+                raise RuntimeError(f"could not shorten node worktree path: {detail}")
+            node.worktree = str(path)
+            return path
         if self._git_toplevel(path) == path:
+            node.worktree = str(path)
             return path
         if path.exists() and any(path.iterdir()):
             raise RuntimeError(f"node worktree path exists but is not a Git worktree: {path}")
@@ -1193,6 +1212,16 @@ class Runtime:
             with self._integration_lock:
                 if self._git_toplevel(path) == path:
                     break
+                # A disappeared /tmp checkout can leave prunable worktree metadata that
+                # still claims its proof branch. Pruning removes only that stale checkout
+                # record; the named proof branch and every commit remain durable.
+                subprocess.run(
+                    ["git", "worktree", "prune"],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
                 exists = subprocess.run(
                     [
                         "git",
@@ -1239,6 +1268,34 @@ class Runtime:
         node.proof_base_commit = base
         self._link_lake_packages(path)
         return path
+
+    def _node_worktree_path(self, node: NodeRecord) -> Path:
+        """Choose a stable checkout path short enough for Humanize's epic key."""
+        descriptive = (
+            self.project.parent
+            / ".recursive-lean-node-worktrees"
+            / self.run_root.name
+            / slug(node.id)
+            / f"attempt-{max(node.attempts, 1)}"
+            / self.project.name
+        )
+        if len(str(descriptive)) <= 180:
+            return descriptive
+        identity = "\0".join(
+            (
+                str(self.project),
+                self.run_root.name,
+                node.id,
+                str(max(node.attempts, 1)),
+            )
+        )
+        digest = hashlib.sha256(identity.encode()).hexdigest()[:20]
+        return (
+            Path(tempfile.gettempdir())
+            / "humanize-lean-worktrees"
+            / digest
+            / self.project.name
+        )
 
     def _link_lake_packages(self, path: Path) -> None:
         """Share the immutable dependency checkout when Git excludes the link."""
