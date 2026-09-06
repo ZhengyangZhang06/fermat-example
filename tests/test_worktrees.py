@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from _recursive_lean.models import Decomposition, NodeRecord, SolveResult, Subproblem
 from _recursive_lean.runtime import Runtime, _WorkspaceAgent
+from _recursive_lean.store import Store
 
 
 def git(cwd: Path, *arguments: str) -> str:
@@ -63,6 +64,40 @@ class FakeAgent:
 
 
 class WorktreeTests(unittest.TestCase):
+    def test_mermaid_arrows_point_from_dependent_to_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = Store(root / "run", root / "wiki", "diagram fixture")
+            store.ensure(
+                "root",
+                parent=None,
+                depth=0,
+                title="Root",
+                statement="Root theorem",
+            )
+            store.ensure(
+                "root.base-a1",
+                parent="root",
+                depth=1,
+                title="Base",
+                statement="Base theorem",
+            )
+            store.ensure(
+                "root.after-a1",
+                parent="root",
+                depth=1,
+                title="After",
+                statement="Dependent theorem",
+                depends_on=["root.base-a1"],
+            )
+
+            diagram = (root / "run" / "dag.mmd").read_text()
+            self.assertIn("Every solid arrow A --&gt; B means A depends on B", diagram)
+            self.assertIn("n_root --> n_root_base_a1", diagram)
+            self.assertIn("n_root_after_a1 --> n_root_base_a1", diagram)
+            self.assertNotIn("n_root_base_a1 --> n_root_after_a1", diagram)
+            self.assertNotIn("-.->", diagram)
+
     def test_workspace_agent_binds_new_sessions(self) -> None:
         wanted = Path("/tmp/isolated-node").resolve()
         base = FakeAgent()

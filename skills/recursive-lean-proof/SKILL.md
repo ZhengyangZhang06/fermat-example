@@ -71,8 +71,9 @@ worktree, so Humanize state, source edits, and comparator scratch files are isol
 integration of fully comparator- and reviewer-approved histories into the problem branch. When
 parallel histories touch the same Lean file, preserve both in an integration worktree and rerun
 the comparator before advancing the problem branch. Nodes with unproved dependencies remain
-queued until prerequisite commits are integrated. In the live Mermaid graph, solid edges describe
-decomposition while dashed edges describe scheduling prerequisites; a decomposition leaf may
+queued until prerequisite commits are integrated. In the live Mermaid graph every edge is solid
+and every arrow `A --> B` means A depends on B. Parent theorems therefore point to their
+decomposition children, and nodes point to their explicit prerequisites; a decomposition leaf may
 still be dependency-blocked.
 
 Persist every natural-language draft and its exact review feedback. If proof review fails or the

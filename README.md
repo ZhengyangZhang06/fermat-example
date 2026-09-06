@@ -104,10 +104,12 @@ controller comparator and the fresh reviewer's independent rerun; publication do
 the root theorem or the rest of the problem. Pages include the natural proof, frozen scaffold,
 Lean source, recursion level, and comparator evidence.
 
-The Mermaid diagram deliberately contains two edge types. A solid edge is only the decomposition
-tree (parent problem to child problem); a dashed edge is a proof prerequisite. A node can therefore
-be a decomposition leaf while still being dependency-blocked. The node label and status table say
-`dependency-ready` or list the exact blocking prerequisite; scheduling follows the dashed edges.
+The Mermaid diagram uses one line style and one direction convention everywhere: every solid arrow
+`A --> B` means **A depends on B**, so B must be proved before A can finish. A parent theorem points
+to each theorem created by its decomposition, and a theorem points to every explicit prerequisite
+listed in `depends_on`. A node can therefore be a decomposition leaf while still pointing to an
+upstream prerequisite. The node label and status table say `dependency-ready` or list the exact
+blocking prerequisite.
 
 ## Review gates
 

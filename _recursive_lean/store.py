@@ -128,23 +128,29 @@ class Store:
             )
             mermaid = [
                 "flowchart TD",
-                '  legend["Solid edge: decomposition child<br/>'
-                "Dashed edge: proof prerequisite<br/>"
-                'Scheduler follows prerequisite readiness"]',
+                '  legend["Every solid arrow A --&gt; B means A depends on B<br/>'
+                'B must be proved before A can finish"]',
             ]
             for record in ordered:
                 label = self._label(record, self._scheduling(record))
                 mermaid.append(f'  {self._mermaid_id(record.id)}["{label}"]')
+            # Use one direction and one line style everywhere: the arrow starts at
+            # the dependent theorem and points toward what it needs. A parent
+            # depends on every decomposition child; a node depends on every
+            # explicit prerequisite in ``depends_on``.
+            edges: set[tuple[str, str]] = set()
             for record in ordered:
                 if record.parent:
-                    mermaid.append(
-                        f"  {self._mermaid_id(record.parent)} --> {self._mermaid_id(record.id)}"
-                    )
-                mermaid.extend(
-                    f"  {self._mermaid_id(dependency)} -.-> {self._mermaid_id(record.id)}"
+                    edges.add((record.parent, record.id))
+                edges.update(
+                    (record.id, dependency)
                     for dependency in record.depends_on
                     if dependency in self.nodes
                 )
+            mermaid.extend(
+                f"  {self._mermaid_id(dependent)} --> {self._mermaid_id(dependency)}"
+                for dependent, dependency in sorted(edges)
+            )
             diagram = "\n".join(mermaid) + "\n"
             atomic_text(self.root / "dag.mmd", diagram)
             rows = [
