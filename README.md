@@ -5,6 +5,12 @@ A native Humanize flow for recursively solving large mathematical problems in Le
 requires the repository comparator before and during every Lean review, displays a live DAG,
 and publishes every accepted theorem to a Markdown wiki.
 
+This repository runs natively on the Humanize 2 `hmz` runtime and flow API. The component names
+`official/humanize1:gen-plan` and `official/humanize1:rlcr` are the names under which Humanize 2's
+official flowverse currently exposes the ported Humanize 1 algorithms; they do not mean that this
+flow runs on the old Humanize 1 runtime. There are currently no `official/humanize2:gen-plan` or
+`official/humanize2:rlcr` aliases.
+
 Exactly one scaffold plan is generated in `humanize1:gen-plan` direct mode, with no subsequent
 plan-review or plan-revision stage, and retained unchanged. Mathematical defects are
 handled by an RLCR-style natural-language loop that repeatedly revises the latest proof draft

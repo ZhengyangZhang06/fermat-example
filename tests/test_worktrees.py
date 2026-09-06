@@ -411,6 +411,114 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_stale_proof_base_skips_commits_already_on_canonical(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "stale_base_problem"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text(
+                "namespace Submission\n\nend Submission\n"
+            )
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize stale-base fixture")
+
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                )
+                runtime = Runtime(None, "stale-base fixture", config, {})
+                node = NodeRecord(
+                    id="root.stale_base-a1",
+                    title="Stale-base leaf",
+                    statement="True",
+                    attempts=1,
+                )
+                worktree = runtime._node_worktree(node)
+                stale_before = runtime._git_head(worktree)
+
+                (project / "Canonical.lean").write_text(
+                    "theorem canonical : True := by trivial\n"
+                )
+                git(project, "add", "Canonical.lean")
+                git(project, "commit", "-m", "feat: advance canonical")
+                canonical = runtime._git_head(project)
+
+                # Model an official worker updating its long-lived branch while the
+                # controller still retains the original proof-base checkpoint.
+                git(worktree, "merge", "--ff-only", canonical)
+                (worktree / "Candidate.lean").write_text(
+                    "theorem candidate : True := by trivial\n"
+                )
+                git(worktree, "add", "Candidate.lean")
+                git(worktree, "commit", "-m", "feat: prove candidate")
+                after = runtime._git_head(worktree)
+
+                integrated, feedback = runtime._integrate_candidate(
+                    worktree, stale_before, after
+                )
+
+                self.assertTrue(integrated, feedback)
+                self.assertTrue((project / "Canonical.lean").is_file())
+                self.assertTrue((project / "Candidate.lean").is_file())
+            finally:
+                os.chdir(original)
+
+    def test_duplicate_patch_is_an_accepted_empty_cherry_pick(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "duplicate_patch_problem"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text(
+                "namespace Submission\n\nend Submission\n"
+            )
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize duplicate fixture")
+
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                )
+                runtime = Runtime(None, "duplicate-patch fixture", config, {})
+                node = NodeRecord(
+                    id="root.duplicate-a1",
+                    title="Duplicate leaf",
+                    statement="True",
+                    attempts=1,
+                )
+                worktree = runtime._node_worktree(node)
+                before = runtime._git_head(worktree)
+                duplicate = "theorem duplicate : True := by trivial\n"
+                (worktree / "Duplicate.lean").write_text(duplicate)
+                git(worktree, "add", "Duplicate.lean")
+                git(worktree, "commit", "-m", "feat: candidate copy")
+                after = runtime._git_head(worktree)
+
+                (project / "Duplicate.lean").write_text(duplicate)
+                git(project, "add", "Duplicate.lean")
+                git(project, "commit", "-m", "feat: canonical copy")
+
+                integrated, feedback = runtime._integrate_candidate(
+                    worktree, before, after
+                )
+
+                self.assertTrue(integrated, feedback)
+                self.assertEqual((project / "Duplicate.lean").read_text(), duplicate)
+                self.assertTrue(runtime._git_clean(project))
+            finally:
+                os.chdir(original)
+
     def test_parallel_same_file_leaf_additions_are_union_integrated(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:

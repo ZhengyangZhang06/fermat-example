@@ -1213,7 +1213,6 @@ class Runtime:
             raise RuntimeError(f"node worktree path exists but is not a Git worktree: {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
         branch = self._node_branch(node)
-        base = self._git_head(self.project)
         detail = "unknown Git error"
         for retry in range(6):
             with self._integration_lock:
@@ -1272,7 +1271,10 @@ class Runtime:
             raise RuntimeError(f"could not create isolated node worktree: {detail}")
         node.worktree = str(path)
         node.proof_branch = branch
-        node.proof_base_commit = base
+        # HEAD may advance while this worker waits for the integration lock.  Record the
+        # commit the new worktree actually checked out, not a pre-lock snapshot of the
+        # moving problem branch.
+        node.proof_base_commit = self._git_head(path)
         self._link_lake_packages(path)
         return path
 
@@ -1357,6 +1359,24 @@ class Runtime:
             if not self._git_clean(self.project):
                 return False, "problem integration worktree is not clean"
             canonical = self._git_head(self.project)
+            # A long-running RLCR may fast-forward or rebase its proof branch onto the
+            # moving problem branch before it writes the theorem commit.  Its persisted
+            # `before` value then predates commits which are already in `canonical`.
+            # Do not cherry-pick those ancestors back onto themselves: Git reports that
+            # as an empty cherry-pick with no unmerged paths.
+            commits = [
+                commit
+                for commit in commits
+                if subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", commit, canonical],
+                    cwd=self.project,
+                    capture_output=True,
+                    check=False,
+                ).returncode
+                != 0
+            ]
+            if not commits:
+                return True, "all reviewed commits were already present in the problem branch"
             if canonical == before:
                 merged = subprocess.run(
                     ["git", "merge", "--ff-only", after],
@@ -1454,6 +1474,26 @@ class Runtime:
             )
             if picked.returncode == 0:
                 continue
+            status = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=integration,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if status.returncode == 0 and not status.stdout.strip():
+                # The same patch can already exist under a different integration commit
+                # hash.  An empty cherry-pick is success: skip its sequencer entry and
+                # continue with any later, genuinely new theorem commits.
+                skipped = subprocess.run(
+                    ["git", "cherry-pick", "--skip"],
+                    cwd=integration,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if skipped.returncode == 0:
+                    continue
             resolved, detail = self._union_lean_conflicts(integration)
             if not resolved:
                 subprocess.run(
