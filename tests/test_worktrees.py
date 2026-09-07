@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from __init__ import WorktreeRlcrConfig, _worktree_review_base
 from _recursive_lean.models import Decomposition, NodeRecord, SolveResult, Subproblem
 from _recursive_lean.prompts import RLCR_LEAN_TASK
 from _recursive_lean.runtime import Runtime, _WorkspaceAgent
@@ -66,6 +67,43 @@ class FakeAgent:
 
 
 class WorktreeTests(unittest.TestCase):
+    def test_legacy_bridge_persists_first_launch_review_base(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "legacy_bridge"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / "Submission.lean").write_text(
+                "theorem first : True := by trivial\n"
+            )
+            git(project, "add", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize legacy bridge")
+            first = git(project, "rev-parse", "HEAD")
+            plan = project / ".humanize" / "node" / "rlcr-plan-v1.md"
+            plan.parent.mkdir(parents=True)
+            plan.write_text("immutable plan\n")
+            config = WorktreeRlcrConfig(plan_file=str(plan))
+
+            try:
+                os.chdir(project)
+                self.assertEqual(_worktree_review_base(config), first)
+                marker = plan.with_name("rlcr-review-base-v1.txt")
+                self.assertEqual(marker.read_text().strip(), first)
+
+                (project / "Submission.lean").write_text(
+                    "theorem first : True := by trivial\n"
+                    "theorem second : True := by trivial\n"
+                )
+                git(project, "add", "Submission.lean")
+                git(project, "commit", "-m", "feat: add candidate")
+
+                self.assertNotEqual(git(project, "rev-parse", "HEAD"), first)
+                self.assertEqual(_worktree_review_base(config), first)
+            finally:
+                os.chdir(original)
+
     def test_proved_and_accepted_nodes_reject_regressive_transitions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
