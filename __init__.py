@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple
 
-from hmz.flows import Agent, Moment, flow, load
+from hmz.flows import Agent, Moment, configures, flow, load
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from _recursive_lean.runtime import Runtime
@@ -210,6 +210,16 @@ def _nested_rlcr_config(config: WorktreeRlcrConfig) -> dict[str, Any]:
     return forwarded
 
 
+def _require_explicit_rlcr_review_skip() -> None:
+    """Fail closed when the installed official RLCR cannot honor node isolation."""
+    model = configures("official/humanize1:rlcr")
+    if model is None or "skip_code_review" not in model.model_fields:
+        raise RuntimeError(
+            "official/humanize1:rlcr is too old: update the Humanize 2 official "
+            "flowverse to a version exposing skip_code_review"
+        )
+
+
 @flow(
     resumable=True,
     about="Recursive Lean proving with RLCR plans, comparator gates, a live DAG, and a wiki",
@@ -264,6 +274,7 @@ def worktree_rlcr(
         source = Path(common.stdout.strip()).parent / "lake-manifest.json"
         if source.is_file() and source.resolve() != manifest.resolve():
             shutil.copy2(source, manifest)
+    _require_explicit_rlcr_review_skip()
     forwarded = _nested_rlcr_config(config)
     load("official/humanize1:rlcr", inherit_skills=True)(
         agents,
