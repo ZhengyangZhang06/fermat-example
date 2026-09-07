@@ -77,6 +77,7 @@ class WorktreeTests(unittest.TestCase):
 
         self.assertEqual(config.base_branch, "frozen-post-overlay-base")
         self.assertEqual(forwarded["base_branch"], "")
+        self.assertTrue(forwarded["skip_code_review"])
         self.assertFalse(forwarded["skip_impl"])
 
     def test_proved_and_accepted_nodes_reject_regressive_transitions(self) -> None:
