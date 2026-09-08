@@ -35,6 +35,19 @@ def git(cwd: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
+def reference_use() -> list[dict[str, Any]]:
+    """Minimal complete reference ledger for structured test fixtures."""
+    return [
+        {
+            "source": source,
+            "queries": ["fixture query"],
+            "files": [f"/references/{source}/README.md"],
+            "conclusion": "fixture source was consulted",
+        }
+        for source in ("TauCeti", "lean-pool", "mathlib-internal")
+    ]
+
+
 class FakeSession:
     def __init__(self, cwd: Path) -> None:
         self.cwd = cwd
@@ -202,6 +215,7 @@ class WorktreeTests(unittest.TestCase):
                 plan = project / "plan.md"
                 plan.write_text("# Plan\n")
                 with (
+                    patch.dict(os.environ, {"HF_TOKEN": "bootstrap-only-secret"}),
                     patch(
                         "_recursive_lean.runtime.shutil.which",
                         return_value="/usr/bin/hmz",
@@ -220,6 +234,7 @@ class WorktreeTests(unittest.TestCase):
                 self.assertTrue(passed)
                 self.assertTrue(log.is_file())
                 self.assertEqual(launched.call_args.kwargs["cwd"], worktree)
+                self.assertNotIn("HF_TOKEN", launched.call_args.kwargs["env"])
                 command = launched.call_args.args[0]
                 self.assertIn(":worktree-rlcr", command[3])
                 self.assertEqual(command[-1], "prove the node")
@@ -947,6 +962,7 @@ class WorktreeTests(unittest.TestCase):
                     statement="True",
                 )
                 decomposition = Decomposition(
+                    reference_use=reference_use(),
                     should_split=True,
                     rationale="three-node dependency fixture",
                     subproblems=[
@@ -1029,6 +1045,7 @@ class WorktreeTests(unittest.TestCase):
                 child.status = "proved"
                 child.theorems = ["Submission.stable_lemma"]
                 decomposition = Decomposition(
+                    reference_use=reference_use(),
                     should_split=True,
                     rationale="retry with the same theorem identity",
                     subproblems=[
@@ -1110,6 +1127,7 @@ class WorktreeTests(unittest.TestCase):
                 accepted.candidate_commit = "candidate"
                 accepted.theorems = ["Submission.accepted_child"]
                 decomposition = Decomposition(
+                    reference_use=reference_use(),
                     should_split=True,
                     rationale="one accepted prerequisite and its dependent",
                     subproblems=[
