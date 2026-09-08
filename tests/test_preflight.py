@@ -150,7 +150,7 @@ class PreflightTests(unittest.TestCase):
             FetchedProblem.model_validate(
                 baseline | {"markdown": problem_markdown() + "\n# A second problem\n"}
             )
-        with self.assertRaisesRegex(ValueError, "exactly one matching Problem id row"):
+        with self.assertRaisesRegex(ValueError, "all match the selected problem"):
             FetchedProblem.model_validate(
                 baseline
                 | {
@@ -158,6 +158,14 @@ class PreflightTests(unittest.TestCase):
                     + "\n| Problem id | `dimitrov` |\n"
                 }
             )
+        repeated = (
+            problem_markdown()
+            + f"\n| Problem id | `{baseline['problem_id']}` |\n"
+        )
+        self.assertEqual(
+            FetchedProblem.model_validate(baseline | {"markdown": repeated}).problem_id,
+            baseline["problem_id"],
+        )
 
     def test_reference_aware_outputs_require_all_three_sources(self) -> None:
         NaturalProof(
