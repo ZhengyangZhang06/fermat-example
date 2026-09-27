@@ -1580,16 +1580,34 @@ class Runtime:
                 ),
             )
 
-        if self._speculation_enabled():
-            for node_id in sorted(managed):
-                node = self.store.nodes[node_id]
-                if node.children:
-                    self._submit_speculative_parent(node)
-
         with ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix=f"frontier-{slug(root.id)}",
         ) as executor:
+            # Retry an interrupted/failed ready frontier before the potentially large
+            # speculative-parent initialization pass. Ordinary fresh work still starts
+            # after speculation, preserving immediate parent coding on normal resumes.
+            for node in ready_nodes():
+                if node.status != "failed":
+                    break
+                scheduled.add(node.id)
+                self.store.update(
+                    node.id,
+                    "queued",
+                    "retrying failed checkpoint before resumed speculative initialization",
+                )
+                future = executor.submit(
+                    self._formalize_checkpoint_parent
+                    if node.children
+                    else self._solve,
+                    node,
+                )
+                running[future] = node.id
+            if self._speculation_enabled():
+                for node_id in sorted(managed):
+                    node = self.store.nodes[node_id]
+                    if node.children:
+                        self._submit_speculative_parent(node)
             while self.store.nodes[root.id].status != "proved":
                 for node in ready_nodes():
                     scheduled.add(node.id)
