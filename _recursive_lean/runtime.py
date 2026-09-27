@@ -848,6 +848,11 @@ class Runtime:
         # mathematical corrections iterate the natural-language proof from its latest
         # checkpoint; they do not generate a fresh plan on every outer attempt.
         plan = self._recorded_plan(node)
+        # A restart can happen after prose review succeeds but before decomposition has
+        # created any children.  In that state ``node.children`` is still empty, so the
+        # global frontier deliberately calls back into ``_solve``.  Preserve the accepted
+        # prose checkpoint instead of sending it through author/reviewer RLCR again.
+        accepted_natural = self._accepted_natural_checkpoint(node)
         if plan is None:
             # A stopped direct gen-plan may leave either its substantive output in the
             # atomic-write temporary file or only the controller's concrete input draft.
@@ -877,7 +882,10 @@ class Runtime:
                     "One-time direct plan generation produced no usable scaffold."
                 )
                 break
-            natural = self._accepted_natural_proof(node, plan, feedback)
+            natural = accepted_natural
+            accepted_natural = None
+            if natural is None:
+                natural = self._accepted_natural_proof(node, plan, feedback)
             if natural is None:
                 feedback = "No complete natural-language proof survived review."
                 continue
@@ -3268,6 +3276,36 @@ not blockers for completion of this implementation-only plan.
         except (OSError, ValueError):
             return None
         return proof.reference_use
+
+    def _accepted_natural_checkpoint(self, node: NodeRecord) -> NaturalProof | None:
+        """Rehydrate prose that already passed review before an interrupted split.
+
+        The Markdown artifact is the human-readable checkpoint, while the paired JSON
+        retains the exact structured proof and source ledger.  Require both that JSON and
+        its consistent passing audit so a stale or partial path cannot skip prose review.
+        """
+        if not node.natural_proof:
+            return None
+        accepted_path = self.project / node.natural_proof
+        match = re.search(r"natural-proof-v(\d+)\.md$", node.natural_proof)
+        if match is None or not accepted_path.is_file():
+            return None
+        version = match.group(1)
+        node_dir = self._node_dir(node)
+        proof_path = node_dir / f"natural-proof-draft-v{version}.json"
+        audit_path = node_dir / f"natural-audit-v{version}.json"
+        try:
+            proof = NaturalProof.model_validate_json(
+                proof_path.read_text(encoding="utf-8")
+            )
+            audit = NaturalAudit.model_validate_json(
+                audit_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            return None
+        if proof.unresolved or not audit.passed:
+            return None
+        return proof
 
     def _preserved_plan(self, node: NodeRecord) -> Path | None:
         """Return the best existing immutable scaffold after an interrupted run.

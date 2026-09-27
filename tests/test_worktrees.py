@@ -20,6 +20,7 @@ from __init__ import (
 )
 from _recursive_lean.models import (
     Decomposition,
+    NaturalAudit,
     NaturalProof,
     NodeRecord,
     SolveResult,
@@ -599,6 +600,80 @@ class WorktreeTests(unittest.TestCase):
                 self.assertEqual(record.proof_branch, "humanize-recursive/accepted")
                 self.assertEqual(record.proof_base_commit, "base")
                 self.assertEqual(record.candidate_commit, "candidate")
+            finally:
+                os.chdir(original)
+
+    def test_resume_after_natural_acceptance_reuses_proof_before_decomposition(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "accepted_natural_resume_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                )
+                runtime = Runtime(None, "accepted natural resume fixture", config, {})
+                node = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Root",
+                    statement="True",
+                )
+                plan = runtime._node_dir(node) / "plan-v1.md"
+                plan.write_text("# Plan\n\nProve True.\n")
+                proof = NaturalProof(
+                    reference_use=reference_use(),
+                    proof="1. The proposition True follows by its constructor.",
+                    key_steps=["Apply the constructor of True."],
+                    unresolved=[],
+                )
+                audit = NaturalAudit(
+                    reference_use=reference_use(),
+                    acceptable=True,
+                    first_invalid_step="",
+                    required_changes=[],
+                )
+                draft = runtime._node_dir(node) / "natural-proof-draft-v1.json"
+                draft.write_text(proof.model_dump_json(indent=2) + "\n")
+                audit_path = runtime._node_dir(node) / "natural-audit-v1.json"
+                audit_path.write_text(audit.model_dump_json(indent=2) + "\n")
+                accepted = runtime._node_dir(node) / "natural-proof-v1.md"
+                accepted.write_text("# Natural-language proof\n\n" + proof.proof + "\n")
+                node.plan = str(plan.relative_to(project))
+                node.natural_proof = str(accepted.relative_to(project))
+                node.status = "interrupted"
+                decomposition = Decomposition(
+                    reference_use=reference_use(),
+                    should_split=False,
+                    rationale="The checkpoint can proceed directly.",
+                    subproblems=[],
+                )
+
+                with (
+                    patch.object(
+                        runtime,
+                        "_accepted_natural_proof",
+                        side_effect=AssertionError("accepted prose must not be regenerated"),
+                    ),
+                    patch.object(
+                        runtime, "_decompose", return_value=decomposition
+                    ) as decompose,
+                    patch.object(runtime, "_solve_children", return_value=[]),
+                    patch.object(
+                        runtime,
+                        "_formalize",
+                        return_value=SolveResult(ok=True, node_id="root"),
+                    ),
+                ):
+                    result = runtime._solve(node)
+
+                self.assertTrue(result.ok)
+                resumed = decompose.call_args.args[1]
+                self.assertEqual(resumed.proof, proof.proof)
+                self.assertEqual(resumed.reference_use, proof.reference_use)
             finally:
                 os.chdir(original)
 
