@@ -1571,7 +1571,14 @@ class Runtime:
                     ):
                         continue
                 ready.append(node)
-            return sorted(ready, key=lambda one: (dependency_level(one.id), one.id))
+            return sorted(
+                ready,
+                key=lambda one: (
+                    one.status != "failed",
+                    dependency_level(one.id),
+                    one.id,
+                ),
+            )
 
         if self._speculation_enabled():
             for node_id in sorted(managed):
