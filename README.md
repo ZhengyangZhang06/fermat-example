@@ -87,7 +87,10 @@ offline-reproducible and prevents Lake from trying to update shared read-only Gi
    starts another batch from the latest draft and cannot kill the node.
 6. **Decide whether to split.** After the prose proof passes, a decomposition audit checks each
    proposed child theorem, its exact Lean statement and name, and the acyclic dependency list. A
-   child repeats the same lifecycle, so recursive workers also produce prose before Lean.
+   child repeats the same lifecycle, so recursive workers also produce prose before Lean. Child
+   declaration names are reserved across the whole live DAG: an active cross-branch collision is
+   rejected before formal work, while a comparator-accepted declaration may be shared only when
+   its frozen Lean type is identical.
 7. **Launch the ready frontier.** Every node whose explicit prerequisites and required children
    have passed both isolated comparator gates is launched, up to `max_parallel_children`.
    Independent leaves from the same problem run together. A parent may therefore start while an

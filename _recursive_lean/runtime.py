@@ -1206,6 +1206,11 @@ class Runtime:
                 feedback = cycle
                 self.store.update(node.id, "decomposing", feedback)
                 continue
+            name_problem = self._existing_lean_name_problem(node, made.subproblems)
+            if name_problem:
+                feedback = name_problem
+                self.store.update(node.id, "decomposing", feedback)
+                continue
             try:
                 audit = _structured_turn(
                     self.agents.reviewer.clone(),
@@ -1260,6 +1265,15 @@ class Runtime:
                 )
                 self.store.update(node.id, "decomposing", feedback)
                 continue
+            # The decomposition author and reviewer may have run concurrently with a
+            # different branch that reserved the same global Submission declaration.
+            # Recheck immediately before activation so that a later integration cannot
+            # discover two individually valid commits declaring the same theorem name.
+            name_problem = self._existing_lean_name_problem(node, made.subproblems)
+            if name_problem:
+                feedback = name_problem
+                self.store.update(node.id, "decomposing", feedback)
+                continue
             return made
         self.store.update(node.id, "decomposing", feedback)
         return None
@@ -1283,6 +1297,18 @@ class Runtime:
         if not decomposition.should_split:
             return []
         with self._graph_lock:
+            name_problem = self._existing_lean_name_problem(
+                parent, decomposition.subproblems
+            )
+            if name_problem:
+                self.store.update(parent.id, "decomposing", name_problem)
+                return [
+                    SolveResult(
+                        ok=False,
+                        node_id=parent.id,
+                        feedback=name_problem,
+                    )
+                ]
             existing_by_name: dict[str, NodeRecord] = {}
             candidates = sorted(
                 (
@@ -3436,6 +3462,48 @@ not blockers for completion of this implementation-only plan.
             Runtime._topological(subproblems)
         except ValueError as error:
             return str(error)
+        return ""
+
+    def _existing_lean_name_problem(
+        self,
+        parent: NodeRecord,
+        subproblems: list[Subproblem],
+    ) -> str:
+        """Reject cross-branch declaration collisions before formal work begins.
+
+        A retry below the same parent may reuse its durable node.  A theorem accepted in
+        another branch may also be shared, but only when its frozen Lean type is exactly
+        the same.  An unaccepted node owned by another parent cannot safely be shared:
+        both parent executors could otherwise formalize it concurrently.  Requiring a
+        fresh name in that case also prevents two isolated candidates from colliding only
+        after their histories are combined.
+        """
+        for subproblem in subproblems:
+            statement = subproblem.lean_statement.strip()
+            matches = sorted(
+                (
+                    node
+                    for node in self.store.nodes.values()
+                    if node.id != parent.id and node.lean_name == subproblem.lean_name
+                ),
+                key=lambda node: node.id,
+            )
+            for existing in matches:
+                if existing.lean_statement.strip() != statement:
+                    return (
+                        f"Lean name `{subproblem.lean_name}` is already frozen by DAG node "
+                        f"{existing.id} with a different type; choose a globally unique "
+                        "bare Lean identifier"
+                    )
+                if existing.parent == parent.id:
+                    continue
+                if self._accepted_checkpoint(existing):
+                    continue
+                return (
+                    f"Lean name `{subproblem.lean_name}` is already reserved by active "
+                    f"DAG node {existing.id} under another parent; choose a globally "
+                    "unique bare Lean identifier"
+                )
         return ""
 
     @staticmethod

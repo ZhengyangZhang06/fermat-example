@@ -190,7 +190,10 @@ implementation and comparator will refer to that declaration as `Submission.X`. 
 `lean_statement`: the exact, single-line Lean proposition/type expression for that theorem,
 without `theorem`, a declaration name, or `:=` proof. It must elaborate after `import Submission`
 before child proof work begins. This type is frozen and later becomes the independent challenge
-side of the child comparator. Dependencies must be acyclic.
+side of the child comparator. A proposed `lean_name` must not collide with a declaration already
+reserved by another active DAG branch. An exact comparator-accepted declaration may be reused only
+with the identical frozen Lean type; otherwise choose a globally unique bare identifier.
+Dependencies must be acyclic.
 When a typeclass-sensitive object is constructed inline, verify the inferred instance rather than
 only checking that the proposition elaborates. In particular, write `IsUnit (Matrix.of (fun ...))`
 for a constructed square matrix: `IsUnit (fun ... : Matrix ...)` silently selects pointwise
@@ -220,6 +223,8 @@ the prose statement includes all hypotheses, dependencies are acyclic and correc
 and every `lean_statement` is an exact one-line Lean proposition matching its prose statement.
 Check that every `lean_name` is a bare identifier `X` intended to be declared as `Submission.X`,
 not an attempted encoding of the namespace such as `Submission_X` or `SubmissionX`.
+Reject a name already reserved by another active DAG branch. Reuse of a previously
+comparator-accepted declaration is valid only when the frozen Lean type is identical.
 The frozen Lean type must be independently usable as the challenge side of a comparator; reject
 a full declaration, proof, placeholder, post-hoc alias type, or type that depends on the child
 being implemented already. For a split, return exactly one node audit for every key. For an

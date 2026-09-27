@@ -1249,14 +1249,17 @@ class WorktreeTests(unittest.TestCase):
                     future = executor.submit(
                         runtime._wait_for_accepted_dependencies, dependent
                     )
-                    deadline = time.monotonic() + 2
+                    # The experiment deliberately runs many Lean workers in parallel;
+                    # allow filesystem-saturated CI hosts enough time to schedule this
+                    # polling thread without weakening the dependency assertion.
+                    deadline = time.monotonic() + 30
                     while dependent.status != "waiting-lean":
                         self.assertLess(time.monotonic(), deadline)
                         time.sleep(0.01)
                     self.assertFalse(future.done())
                     prerequisite.status = "integrating"
                     prerequisite.candidate_commit = "accepted-candidate"
-                    self.assertEqual(future.result(timeout=2), "")
+                    self.assertEqual(future.result(timeout=30), "")
             finally:
                 os.chdir(original)
 
@@ -1337,6 +1340,226 @@ class WorktreeTests(unittest.TestCase):
                 self.assertEqual(parent.children, ["root.lemma-a1", "root.second-a1"])
                 self.assertFalse(
                     any(node_id.endswith("-a2") for node_id in runtime.store.nodes)
+                )
+            finally:
+                os.chdir(original)
+
+    def test_cross_branch_pending_lean_name_collision_is_rejected(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "pending_name_collision_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_nodes=10,
+                    max_parallel_children=4,
+                )
+                runtime = Runtime(None, "pending name collision fixture", config, {})
+                first_parent = runtime.store.ensure(
+                    "root.first-a1",
+                    parent="root",
+                    depth=1,
+                    title="First parent",
+                    statement="First parent theorem",
+                )
+                second_parent = runtime.store.ensure(
+                    "root.second-a1",
+                    parent="root",
+                    depth=1,
+                    title="Second parent",
+                    statement="Second parent theorem",
+                )
+                existing = runtime.store.ensure(
+                    "root.first-a1.shared-a1",
+                    parent=first_parent.id,
+                    depth=2,
+                    title="Pending shared theorem",
+                    statement="A pending theorem in another branch",
+                    lean_statement="True",
+                    lean_name="shared_theorem",
+                )
+                existing.status = "rlcr-lean"
+                decomposition = Decomposition(
+                    reference_use=reference_use(),
+                    should_split=True,
+                    rationale="attempt to reserve the same declaration concurrently",
+                    subproblems=[
+                        Subproblem(
+                            key="shared",
+                            title="Conflicting shared theorem",
+                            statement="The same proposition requested by another branch",
+                            lean_statement="True",
+                            lean_name="shared_theorem",
+                            depends_on=[],
+                        ),
+                        Subproblem(
+                            key="other",
+                            title="Independent theorem",
+                            statement="A separate theorem with a unique declaration name",
+                            lean_statement="True",
+                            lean_name="other_theorem",
+                            depends_on=[],
+                        ),
+                    ],
+                )
+
+                results = runtime._solve_children(second_parent, decomposition, 1)
+
+                self.assertEqual(len(results), 1)
+                self.assertFalse(results[0].ok)
+                self.assertIn("already reserved by active DAG node", results[0].feedback)
+                self.assertEqual(second_parent.children, [])
+            finally:
+                os.chdir(original)
+
+    def test_accepted_lean_name_with_different_type_is_rejected(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "accepted_name_type_collision_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_nodes=10,
+                    max_parallel_children=4,
+                )
+                runtime = Runtime(None, "accepted name collision fixture", config, {})
+                parent = runtime.store.ensure(
+                    "root.second-a1",
+                    parent="root",
+                    depth=1,
+                    title="Second parent",
+                    statement="Second parent theorem",
+                )
+                accepted = runtime.store.ensure(
+                    "root.first-a1.shared-a1",
+                    parent="root.first-a1",
+                    depth=2,
+                    title="Accepted theorem",
+                    statement="An accepted theorem with another type",
+                    lean_statement="True",
+                    lean_name="shared_theorem",
+                )
+                accepted.status = "proved"
+                accepted.theorems = ["Submission.shared_theorem"]
+                decomposition = Decomposition(
+                    reference_use=reference_use(),
+                    should_split=True,
+                    rationale="reuse is invalid when the frozen types differ",
+                    subproblems=[
+                        Subproblem(
+                            key="shared",
+                            title="Different theorem",
+                            statement="A proposition with a different frozen type",
+                            lean_statement="False",
+                            lean_name="shared_theorem",
+                            depends_on=[],
+                        ),
+                        Subproblem(
+                            key="other",
+                            title="Independent theorem",
+                            statement="A separate theorem with a unique declaration name",
+                            lean_statement="True",
+                            lean_name="other_theorem",
+                            depends_on=[],
+                        ),
+                    ],
+                )
+
+                results = runtime._solve_children(parent, decomposition, 1)
+
+                self.assertEqual(len(results), 1)
+                self.assertFalse(results[0].ok)
+                self.assertIn("already frozen by DAG node", results[0].feedback)
+                self.assertIn("different type", results[0].feedback)
+                self.assertEqual(parent.children, [])
+            finally:
+                os.chdir(original)
+
+    def test_cross_branch_accepted_same_type_is_reused(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "accepted_name_reuse_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_nodes=10,
+                    max_parallel_children=4,
+                )
+                runtime = Runtime(None, "accepted name reuse fixture", config, {})
+                parent = runtime.store.ensure(
+                    "root.second-a1",
+                    parent="root",
+                    depth=1,
+                    title="Second parent",
+                    statement="Second parent theorem",
+                )
+                accepted = runtime.store.ensure(
+                    "root.first-a1.shared-a1",
+                    parent="root.first-a1",
+                    depth=2,
+                    title="Accepted theorem",
+                    statement="An accepted theorem",
+                    lean_statement="True",
+                    lean_name="shared_theorem",
+                )
+                accepted.status = "proved"
+                accepted.theorems = ["Submission.shared_theorem"]
+                decomposition = Decomposition(
+                    reference_use=reference_use(),
+                    should_split=True,
+                    rationale="the exact accepted declaration may be shared",
+                    subproblems=[
+                        Subproblem(
+                            key="shared",
+                            title="Shared accepted theorem",
+                            statement="The exact same accepted proposition",
+                            lean_statement="True",
+                            lean_name="shared_theorem",
+                            depends_on=[],
+                        ),
+                        Subproblem(
+                            key="other",
+                            title="Independent theorem",
+                            statement="A separate theorem with a unique declaration name",
+                            lean_statement="True",
+                            lean_name="other_theorem",
+                            depends_on=[],
+                        ),
+                    ],
+                )
+
+                started: list[str] = []
+
+                def solve(node: NodeRecord) -> SolveResult:
+                    started.append(node.id)
+                    node.status = "proved"
+                    node.theorems = [f"Submission.{node.lean_name}"]
+                    return SolveResult(
+                        ok=True,
+                        node_id=node.id,
+                        theorems=runtime._checkpoint_theorems(node),
+                    )
+
+                runtime._solve = solve  # type: ignore[method-assign]
+
+                results = runtime._solve_children(parent, decomposition, 1)
+
+                self.assertEqual(len(results), 2)
+                self.assertTrue(all(result.ok for result in results))
+                self.assertEqual(results[0].node_id, accepted.id)
+                self.assertEqual(started, ["root.second-a1.other-a1"])
+                self.assertEqual(
+                    parent.children,
+                    [accepted.id, "root.second-a1.other-a1"],
                 )
             finally:
                 os.chdir(original)
