@@ -74,6 +74,49 @@ INTEGRATION_GIT = (
 )
 
 
+def _structured_turn(session: Any, prompt: str, schema: Any) -> Any:
+    """Return a schema-valid answer, including one completed before transport failed.
+
+    Codex can emit its complete ``agentMessage`` and then lose the websocket before the
+    terminal ``turn/completed`` event.  HMZ correctly exposes that completed message on the
+    resulting ``CalledProcessError``; treating it as an ordinary suppressed failure throws
+    away an expensive, already schema-constrained answer.  Recover only text that validates
+    against the requested model.  A partial status message or malformed response still
+    behaves exactly like ``suppress=True`` and returns ``None``.
+    """
+    try:
+        return session(prompt, suppress=False, schema=schema)
+    except subprocess.CalledProcessError as error:
+        diagnostic = str(error.stderr or "")
+        transport_lost = any(
+            marker in diagnostic
+            for marker in (
+                "responseStreamDisconnected",
+                "stream disconnected before completion",
+                "app server stopped mid-turn",
+            )
+        )
+        if not transport_lost:
+            return None
+        raw = error.stdout if error.stdout is not None else error.output
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        if isinstance(raw, str):
+            held = raw.strip()
+            candidates = [held]
+            first, last = held.find("{"), held.rfind("}")
+            if 0 <= first < last:
+                candidates.append(held[first : last + 1])
+            for candidate in candidates:
+                try:
+                    return schema.model_validate_json(candidate)
+                except (TypeError, ValueError):
+                    continue
+        return None
+    except ValueError:
+        return None
+
+
 class _WorkspaceAgent:
     """Run every session cloned from one Humanize agent in a fixed worktree."""
 
@@ -414,7 +457,8 @@ class Runtime:
             attempts = getattr(self.config, "problem_fetch_attempts", 3)
             fetched = None
             for _ in range(attempts):
-                response = session(
+                response = _structured_turn(
+                    session,
                     FETCH_ONE_PROBLEM.format(
                         collection_url=PROBLEM_COLLECTION_URL,
                         problem_id=self.problem_id,
@@ -427,8 +471,7 @@ class Runtime:
                         request=self.task,
                     )
                     + f"\n\nValidation feedback from the previous response: {feedback}",
-                    suppress=True,
-                    schema=FetchedProblem,
+                    FetchedProblem,
                 )
                 if response is None:
                     feedback = "No valid structured single-problem record was returned."
@@ -940,7 +983,8 @@ class Runtime:
                     "natural-proof",
                     f"natural-language RLCR author revision {version}",
                 )
-                proof = self.agents.worker.clone().new()(
+                proof = _structured_turn(
+                    self.agents.worker.clone().new(),
                     NATURAL_PROOF.format(
                         problem_context=self._problem_context(),
                         reference_context=self._reference_context(),
@@ -949,8 +993,7 @@ class Runtime:
                         feedback=feedback,
                         prior_proof=prior_proof,
                     ),
-                    suppress=True,
-                    schema=NaturalProof,
+                    NaturalProof,
                 )
                 if proof is None:
                     feedback = "The worker returned no structured proof."
@@ -996,15 +1039,15 @@ class Runtime:
                     "natural-review",
                     f"natural-language RLCR reviewer round {version}",
                 )
-                audit = self.agents.reviewer.clone()(
+                audit = _structured_turn(
+                    self.agents.reviewer.clone(),
                     NATURAL_AUDIT.format(
                         problem_context=self._problem_context(),
                         reference_context=self._reference_context(),
                         statement=node.statement,
                         proof=proof.proof,
                     ),
-                    suppress=True,
-                    schema=NaturalAudit,
+                    NaturalAudit,
                 )
                 if audit is not None:
                     atomic_text(
@@ -1064,7 +1107,8 @@ class Runtime:
                 f"subproblem decomposition attempt {attempt}",
             )
             try:
-                made = self.agents.worker.clone()(
+                made = _structured_turn(
+                    self.agents.worker.clone(),
                     DECOMPOSE.format(
                         problem_context=self._problem_context(),
                         reference_context=self._reference_context(),
@@ -1075,8 +1119,7 @@ class Runtime:
                         proof=proof.proof,
                         feedback=feedback,
                     ),
-                    suppress=True,
-                    schema=Decomposition,
+                    Decomposition,
                 )
             except Stopped as error:
                 feedback = f"decomposition worker stopped: {error}"
@@ -1111,7 +1154,8 @@ class Runtime:
                 self.store.update(node.id, "decomposing", feedback)
                 continue
             try:
-                audit = self.agents.reviewer.clone()(
+                audit = _structured_turn(
+                    self.agents.reviewer.clone(),
                     DECOMPOSITION_AUDIT.format(
                         problem_context=self._problem_context(),
                         reference_context=self._reference_context(),
@@ -1119,8 +1163,7 @@ class Runtime:
                         proof=proof.proof,
                         decomposition=made.model_dump_json(indent=2),
                     ),
-                    suppress=True,
-                    schema=DecompositionAudit,
+                    DecompositionAudit,
                 )
             except Stopped as error:
                 feedback = f"decomposition reviewer stopped: {error}"
@@ -1903,7 +1946,8 @@ class Runtime:
             "lean-review",
             f"fresh reviewer reruns comparator in {worktree}",
         )
-        audit = _WorkspaceAgent(self.agents.reviewer.clone(), worktree)(
+        audit = _structured_turn(
+            _WorkspaceAgent(self.agents.reviewer.clone(), worktree),
             LEAN_AUDIT.format(
                 problem_context=self._problem_context(),
                 reference_context=self._reference_context(),
@@ -1917,8 +1961,7 @@ class Runtime:
                 comparator_success=self.config.comparator_success,
                 comparator_log=log[-12000:],
             ),
-            suppress=True,
-            schema=LeanAudit,
+            LeanAudit,
         )
         if audit is not None:
             audit_version = self._next_json_version(node, "lean-audit")
@@ -2648,7 +2691,8 @@ class Runtime:
                     f"{log_path.relative_to(self.project)}\n\n{log[-12000:]}"
                 )
                 continue
-            audit = _WorkspaceAgent(self.agents.reviewer.clone(), integration)(
+            audit = _structured_turn(
+                _WorkspaceAgent(self.agents.reviewer.clone(), integration),
                 INTEGRATION_AUDIT.format(
                     problem_context=self._problem_context(),
                     reference_context=self._reference_context(),
@@ -2664,8 +2708,7 @@ class Runtime:
                     comparator_success=self.config.comparator_success,
                     comparator_log=log[-12000:],
                 ),
-                suppress=True,
-                schema=LeanAudit,
+                LeanAudit,
             )
             if audit is not None:
                 audit_version = self._next_json_version(node, "integration-lean-audit")

@@ -18,9 +18,15 @@ from __init__ import (
     _nested_rlcr_config,
     _require_explicit_rlcr_review_skip,
 )
-from _recursive_lean.models import Decomposition, NodeRecord, SolveResult, Subproblem
+from _recursive_lean.models import (
+    Decomposition,
+    NaturalProof,
+    NodeRecord,
+    SolveResult,
+    Subproblem,
+)
 from _recursive_lean.prompts import RLCR_LEAN_TASK
-from _recursive_lean.runtime import Runtime, _WorkspaceAgent
+from _recursive_lean.runtime import Runtime, _WorkspaceAgent, _structured_turn
 from _recursive_lean.store import Store
 
 
@@ -83,7 +89,68 @@ class FakeAgent:
         return FakeAgent()
 
 
+class FailedAfterAnswer:
+    def __init__(
+        self,
+        output: str,
+        stderr: str = "responseStreamDisconnected: idle timeout",
+    ) -> None:
+        self.output = output
+        self.stderr = stderr
+
+    def __call__(
+        self, prompt: str, *, suppress: bool = False, schema: Any = None
+    ) -> Any:
+        del prompt, suppress, schema
+        raise subprocess.CalledProcessError(
+            1,
+            ["codex", "app-server"],
+            output=self.output,
+            stderr=self.stderr,
+        )
+
+
 class WorktreeTests(unittest.TestCase):
+    def test_structured_turn_recovers_valid_completed_answer_after_disconnect(
+        self,
+    ) -> None:
+        expected = NaturalProof(
+            reference_use=reference_use(),
+            proof="A complete numbered fixture proof.",
+            key_steps=["Conclude the fixture."],
+            unresolved=[],
+        )
+        recovered = _structured_turn(
+            FailedAfterAnswer(expected.model_dump_json()),
+            "prove it",
+            NaturalProof,
+        )
+        self.assertEqual(recovered, expected)
+
+    def test_structured_turn_rejects_partial_answer_after_disconnect(self) -> None:
+        recovered = _structured_turn(
+            FailedAfterAnswer("still checking the final lemma"),
+            "prove it",
+            NaturalProof,
+        )
+        self.assertIsNone(recovered)
+
+    def test_structured_turn_does_not_salvage_nontransport_failure(self) -> None:
+        expected = NaturalProof(
+            reference_use=reference_use(),
+            proof="A complete numbered fixture proof.",
+            key_steps=["Conclude the fixture."],
+            unresolved=[],
+        )
+        recovered = _structured_turn(
+            FailedAfterAnswer(
+                expected.model_dump_json(), stderr="model refused this request"
+            ),
+            "prove it",
+            NaturalProof,
+        )
+        self.assertIsNone(recovered)
+
     def test_nested_rlcr_does_not_enable_generic_code_review(self) -> None:
         config = WorktreeRlcrConfig(
             plan_file="/tmp/immutable-plan.md",
