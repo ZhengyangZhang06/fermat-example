@@ -3338,17 +3338,17 @@ class Runtime:
     ) -> tuple[bool, str]:
         """Repair only composition of histories whose isolated proof gates passed.
 
-        The repair loop deliberately remains inside the serialized integration worktree.  It
+        One repair attempt deliberately remains inside the serialized integration worktree.  It
         never calls the mathematical planner, natural-language author, decomposition stage, or
         node RLCR prover.  Every source repair receives a new machine comparator run and a fresh
-        independent reviewer comparator run before it can advance the canonical branch.
+        independent reviewer comparator run before it can advance the canonical branch.  A
+        failed attempt returns to the integration-only retry loop so another accepted sibling
+        can acquire the project lock instead of waiting behind an unbounded repair session.
         """
         if node is None or self.agents is None:
             return False, failure
         feedback = failure
-        round_number = 0
-        while True:
-            round_number += 1
+        for round_number in range(1, 2):
             self.store.update(
                 node.id,
                 "integrating",
@@ -3376,13 +3376,13 @@ class Runtime:
                 )
             except Exception as error:  # noqa: BLE001
                 feedback = f"integration repair worker failed: {error}"
-                continue
+                return False, feedback
             if not self._git_clean(integration):
                 feedback = (
                     "integration repair left uncommitted changes; preserve them, finish the "
                     "repair, and commit a clean candidate"
                 )
-                continue
+                return False, feedback
             integration_head = self._git_head(integration)
             combined_files = sorted(
                 set(lean_files)
@@ -3399,7 +3399,7 @@ class Runtime:
                     "repaired combined history still failed its comparator; see "
                     f"{log_path.relative_to(self.project)}\n\n{log[-12000:]}"
                 )
-                continue
+                return False, feedback
             audit = _structured_turn(
                 _WorkspaceAgent(self.agents.reviewer.clone(), integration),
                 INTEGRATION_AUDIT.format(
@@ -3429,13 +3429,13 @@ class Runtime:
             reference_problem = self._reference_use_problem(audit)
             if audit is None or not audit.passed or reference_problem:
                 feedback = reference_problem or self._lean_feedback(audit)
-                continue
+                return False, feedback
             if not self._git_clean(integration):
                 feedback = "integration reviewer modified the reviewed worktree"
-                continue
+                return False, feedback
             if self._git_head(integration) != integration_head:
                 feedback = "integration reviewer changed the reviewed Git history"
-                continue
+                return False, feedback
             return (
                 True,
                 (
@@ -3443,6 +3443,7 @@ class Runtime:
                     f"comparator in round {round_number}"
                 ),
             )
+        return False, feedback
 
     def _apply_candidate_commits(
         self, integration: Path, commits: list[str]

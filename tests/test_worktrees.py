@@ -616,6 +616,56 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_failed_integration_repair_yields_after_one_agent_attempt(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "bounded_integration_repair_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    comparator_command="true",
+                    comparator_success="Your solution is okay!",
+                    lean_target="Submission.lean",
+                    huggingface_token_env="HF_TOKEN",
+                )
+                agents = SimpleNamespace(worker=FakeAgent(), reviewer=FakeAgent())
+                runtime = Runtime(
+                    agents,
+                    "bounded integration repair fixture",
+                    config,
+                    {},
+                )
+                node = runtime.store.ensure(
+                    "root.accepted-a1",
+                    parent="root",
+                    depth=1,
+                    title="Accepted theorem",
+                    statement="True",
+                )
+
+                with patch.object(
+                    _WorkspaceAgent,
+                    "__call__",
+                    side_effect=RuntimeError("transient repair failure"),
+                ) as repair_agent:
+                    repaired, feedback = runtime._repair_integration(
+                        project,
+                        canonical="canonical",
+                        commits=["candidate"],
+                        node=node,
+                        lean_files=[],
+                        failure="combined history failed",
+                    )
+
+                self.assertFalse(repaired)
+                self.assertIn("transient repair failure", feedback)
+                repair_agent.assert_called_once()
+            finally:
+                os.chdir(original)
+
     def test_resume_after_natural_acceptance_reuses_proof_before_decomposition(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
