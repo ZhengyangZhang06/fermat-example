@@ -268,7 +268,13 @@ Requirements:
 - Create or complete a globally named theorem for this node; do not hide it as a local `have`.
 - For a child node, its declaration must have exactly the frozen expected Lean type above.
 - Preserve the exact target, hypotheses, imports, and declarations.
-- No `sorry`, `admit`, new axioms, unsafe loopholes, or weakened replacement theorem.
+- For a non-root node, every declaration already present at the frozen proof-base commit is frozen
+  baseline content, including the root challenge placeholder. Preserve that inherited placeholder;
+  do not remove, complete, rename, or replace it while implementing a child. The child comparator
+  deliberately subtracts its frozen warning baseline, so an inherited root `sorry` is not a child
+  failure. A warning-clean child means that this candidate introduces no new warning. Add the
+  selected child theorem beside the baseline declarations.
+- Do not add any new `sorry`, `admit`, axiom, unsafe loophole, or weakened replacement theorem.
 - Run `{comparator_command}` until it exits zero and contains `{comparator_success}`.
 - For a non-root node, that exact node comparator is the complete configured correctness gate.
   Do not run the official root/whole-benchmark comparator or validate unrelated parent or sibling
@@ -323,7 +329,11 @@ Definitions and kernel-checked helper lemmas already present at the frozen proof
 ordinary library infrastructure. The approved-child list is about post-base candidate overlays,
 not an exhaustive declaration allowlist. Do not reject a passing candidate merely because a base
 helper predates the flow or lacks its own child wiki page. Still reject an unapproved prior proof
-of this node, placeholders, new axioms, or code outside the base and approved candidate histories.
+of this node, newly introduced placeholders, new axioms, or code outside the base and approved
+candidate histories. For a non-root node, the inherited root challenge placeholder is frozen
+baseline content: require the candidate to preserve it, and do not count its baseline warning as a
+child defect. Reject removing, completing, renaming, or replacing that root placeholder in a child
+candidate.
 
 Independent machine-gate log from before your review:
 {comparator_log}

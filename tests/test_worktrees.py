@@ -406,6 +406,8 @@ class WorktreeTests(unittest.TestCase):
                 self.assertIn("do not reopen planning or decomposition", RLCR_LEAN_TASK)
                 self.assertIn("Frozen proof-base commit", RLCR_LEAN_TASK)
                 self.assertIn("empty list does not ban proof-base helpers", RLCR_LEAN_TASK)
+                self.assertIn("Preserve that inherited placeholder", RLCR_LEAN_TASK)
+                self.assertIn("introduces no new warning", RLCR_LEAN_TASK)
             finally:
                 os.chdir(original)
 
@@ -1176,11 +1178,20 @@ class WorktreeTests(unittest.TestCase):
                 )
                 moments: dict[str, float] = {}
                 lock = threading.Lock()
+                start_barrier = threading.Barrier(3)
 
                 def solve(node: NodeRecord) -> SolveResult:
                     key = node.id.rsplit(".", 1)[-1].rsplit("-a", 1)[0]
                     with lock:
                         moments[f"start:{key}"] = time.monotonic()
+                    try:
+                        # Make the assertion independent of host scheduling jitter: if all
+                        # children were submitted together, none finishes before every worker
+                        # has actually entered `_solve`.  A dependency-gated scheduler breaks
+                        # the barrier and still fails the ordering assertions below.
+                        start_barrier.wait(timeout=2)
+                    except threading.BrokenBarrierError:
+                        pass
                     time.sleep(0.25 if key == "slow" else 0.02)
                     with lock:
                         moments[f"end:{key}"] = time.monotonic()
