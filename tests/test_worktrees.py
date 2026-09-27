@@ -7,7 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1909,6 +1909,100 @@ class WorktreeTests(unittest.TestCase):
                 self.assertIsNone(future)
                 self.assertEqual(parent.status, "queued")
                 self.assertIn("final parent formalization is ready", parent.message)
+            finally:
+                os.chdir(original)
+
+    def test_failed_speculative_parent_future_can_be_relaunched(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "speculative_retry_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=4,
+                    speculative_parent_formalization=True,
+                )
+                runtime = Runtime(None, "speculative retry fixture", config, {})
+                parent = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Root",
+                    statement="Root theorem",
+                )
+                child = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Child",
+                    statement="Child theorem",
+                    lean_statement="True",
+                    lean_name="child_theorem",
+                )
+                parent.children = [child.id]
+                failed: Future[SolveResult] = Future()
+                failed.set_result(
+                    SolveResult(
+                        ok=False,
+                        node_id=parent.id,
+                        feedback="first speculative pass made no reusable draft",
+                    )
+                )
+                replacement: Future[SolveResult] = Future()
+                runtime._speculation_futures[parent.id] = failed
+
+                with patch.object(
+                    runtime._speculation_executor,
+                    "submit",
+                    return_value=replacement,
+                ) as submit:
+                    relaunched = runtime._submit_speculative_parent(parent)
+
+                self.assertIs(relaunched, replacement)
+                self.assertIs(runtime._speculation_futures[parent.id], replacement)
+                submit.assert_called_once()
+                self.assertEqual(parent.status, "speculative-lean")
+            finally:
+                os.chdir(original)
+
+    def test_node_worktree_creation_does_not_wait_for_integration_repair(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "parallel_worktree_problem"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / "Submission.lean").write_text("import Mathlib\n")
+            git(project, "add", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize parallel fixture")
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=4,
+                )
+                runtime = Runtime(None, "parallel worktree fixture", config, {})
+                node = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Child",
+                    statement="Child theorem",
+                )
+                node.attempts = 1
+
+                with runtime._integration_lock:
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        created = executor.submit(runtime._node_worktree, node).result(
+                            timeout=10
+                        )
+
+                self.assertEqual(runtime._git_toplevel(created), created)
             finally:
                 os.chdir(original)
 

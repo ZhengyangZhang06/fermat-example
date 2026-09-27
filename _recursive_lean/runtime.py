@@ -231,11 +231,12 @@ class Runtime:
         self.config = config
         self.state = state if state is not None else {}
         self.project = Path.cwd().resolve()
-        # The graph and short integration operations are synchronized. Lean workers and
-        # both comparator passes run in per-node Git worktrees, so every ready leaf may
-        # formalize concurrently without sharing source, HEAD, or comparator scratch files.
+        # Canonical-branch promotion and short Git-worktree metadata operations use
+        # separate locks.  Long integration comparators/repairs must not prevent a ready
+        # leaf or speculative parent from obtaining its isolated proof worktree.
         self._graph_lock = threading.RLock()
         self._integration_lock = threading.Lock()
+        self._worktree_lock = threading.Lock()
         self._revision_lock = threading.Lock()
         self._integration_futures_lock = threading.RLock()
         self._speculation_futures_lock = threading.RLock()
@@ -2030,7 +2031,19 @@ class Runtime:
         with self._speculation_futures_lock:
             existing = self._speculation_futures.get(node.id)
             if existing is not None:
-                return existing
+                if not existing.done():
+                    return existing
+                try:
+                    previous = existing.result()
+                except Exception:  # noqa: BLE001
+                    previous = None
+                if previous is not None and previous.ok:
+                    return existing
+                # A failed speculative pass is only an acceleration failure.  Do not
+                # cache it as though a parent worker were still live: a later
+                # decomposition/revision wave must be able to launch the parent again
+                # while its real children continue.
+                self._speculation_futures.pop(node.id, None)
             self.store.update(
                 node.id,
                 "speculative-lean",
@@ -2074,6 +2087,10 @@ class Runtime:
                     "speculative-lean",
                     f"speculative draft failed non-fatally and final RLCR will repair: {error}",
                 )
+        finally:
+            with self._speculation_futures_lock:
+                if self._speculation_futures.get(node.id) is future:
+                    self._speculation_futures.pop(node.id, None)
 
     def _run_speculative_agent(
         self, node: NodeRecord, worktree: Path, prompt: str
@@ -2915,7 +2932,7 @@ class Runtime:
                     f"short node worktree path exists but is not a Git worktree: {path}"
                 )
             path.parent.mkdir(parents=True, exist_ok=True)
-            with self._integration_lock:
+            with self._worktree_lock:
                 moved = subprocess.run(
                     ["git", "worktree", "move", str(recorded), str(path)],
                     cwd=self.project,
@@ -2941,7 +2958,7 @@ class Runtime:
         branch = self._node_branch(node)
         detail = "unknown Git error"
         for retry in range(6):
-            with self._integration_lock:
+            with self._worktree_lock:
                 if self._git_toplevel(path) == path:
                     break
                 # A disappeared /tmp checkout can leave prunable worktree metadata that
@@ -3214,13 +3231,14 @@ class Runtime:
                 )
             )
             integration = temporary / self.project.name
-            added = subprocess.run(
-                ["git", "worktree", "add", "--detach", str(integration), canonical],
-                cwd=self.project,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            with self._worktree_lock:
+                added = subprocess.run(
+                    ["git", "worktree", "add", "--detach", str(integration), canonical],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
             if added.returncode:
                 detail = (added.stderr or added.stdout).strip()
                 try:
@@ -3295,13 +3313,14 @@ class Runtime:
                     f"{method} and integrated {len(commits)} reviewed commit(s)",
                 )
             finally:
-                subprocess.run(
-                    ["git", "worktree", "remove", "--force", str(integration)],
-                    cwd=self.project,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                with self._worktree_lock:
+                    subprocess.run(
+                        ["git", "worktree", "remove", "--force", str(integration)],
+                        cwd=self.project,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
                 try:
                     temporary.rmdir()
                 except OSError:
