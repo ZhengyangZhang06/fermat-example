@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -22,9 +23,14 @@ def now() -> str:
 
 
 def slug(value: str, *, fallback: str = "theorem") -> str:
-    """Turn a model-provided name into a safe file component."""
+    """Turn a model-provided name into a bounded, collision-resistant component."""
     made = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
-    return made[:80] or fallback
+    if not made:
+        return fallback
+    if len(made) <= 80:
+        return made
+    digest = hashlib.sha256(made.encode()).hexdigest()[:10]
+    return f"{made[:69].rstrip('-')}-{digest}"
 
 
 def atomic_text(path: Path, content: str) -> None:

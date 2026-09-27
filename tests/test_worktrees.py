@@ -28,7 +28,7 @@ from _recursive_lean.models import (
 )
 from _recursive_lean.prompts import RLCR_LEAN_TASK
 from _recursive_lean.runtime import Runtime, _WorkspaceAgent, _structured_turn
-from _recursive_lean.store import Store
+from _recursive_lean.store import Store, slug
 
 
 def git(cwd: Path, *arguments: str) -> str:
@@ -112,6 +112,16 @@ class FailedAfterAnswer:
 
 
 class WorktreeTests(unittest.TestCase):
+    def test_overlong_slugs_keep_distinct_hash_suffixes(self) -> None:
+        shared = "root." + ".very_long_generated_dependency" * 5
+        first = slug(shared + ".first_child")
+        second = slug(shared + ".second_child")
+
+        self.assertLessEqual(len(first), 80)
+        self.assertLessEqual(len(second), 80)
+        self.assertNotEqual(first, second)
+        self.assertEqual(slug("Root.Short Name"), "root-short-name")
+
     def test_structured_turn_recovers_valid_completed_answer_after_disconnect(
         self,
     ) -> None:
