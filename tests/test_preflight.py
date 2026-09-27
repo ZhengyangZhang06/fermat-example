@@ -200,6 +200,21 @@ class PreflightTests(unittest.TestCase):
             depends_on=[],
         )
         self.assertEqual(made.lean_statement, statement)
+        let_statement = (
+            "∀ (F : Type) [Field F], "
+            "let G := Multiplicative F; "
+            "let W := IsDedekindDomain.selmerGroup (R := F) (K := F) (S := ∅) "
+            "(n := 3); Nonempty G → Nonempty W"
+        )
+        made_with_lets = Subproblem(
+            key="let_contract",
+            title="Let-bound contract",
+            statement="A generated theorem type may use ordinary top-level let binders.",
+            lean_statement=let_statement,
+            lean_name="let_contract",
+            depends_on=[],
+        )
+        self.assertEqual(made_with_lets.lean_statement, let_statement)
         with self.assertRaisesRegex(ValueError, "type expression"):
             Subproblem(
                 key="invalid_proof",
@@ -209,6 +224,20 @@ class PreflightTests(unittest.TestCase):
                 lean_name="invalid_proof",
                 depends_on=[],
             )
+        for unsafe in (
+            "theorem injected : True := by trivial",
+            "True) := by exact True.intro --",
+            "True /- hidden contract -/",
+        ):
+            with self.subTest(unsafe=unsafe), self.assertRaises(ValueError):
+                Subproblem(
+                    key="unsafe_contract",
+                    title="Unsafe generated contract",
+                    statement="This generated contract must be rejected before activation.",
+                    lean_statement=unsafe,
+                    lean_name="unsafe_contract",
+                    depends_on=[],
+                )
 
     def test_problem_id_is_resolved_before_the_agent_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .lean_contract import validate_lean_statement
+
 MIN_SUBPROBLEMS = 2
 
 ReferenceName = Literal["TauCeti", "lean-pool", "mathlib-internal"]
@@ -220,40 +222,7 @@ class Subproblem(BaseModel):
     @classmethod
     def _safe_lean_statement(cls, value: str) -> str:
         """Keep the frozen type usable as one parenthesized Lean term."""
-        normalized = value.strip()
-        if "\n" in normalized or "\r" in normalized:
-            raise ValueError("lean_statement must be a single line")
-        # Named arguments such as ``(R := RingOfIntegers F)`` are ordinary and often
-        # indispensable inside a type expression.  Reject only a top-level ``:=``, which
-        # is the declaration/proof assignment this frozen interface must not contain.
-        depth = 0
-        quoted = False
-        escaped = False
-        for index, character in enumerate(normalized):
-            if quoted:
-                if escaped:
-                    escaped = False
-                elif character == "\\":
-                    escaped = True
-                elif character == '"':
-                    quoted = False
-                continue
-            if character == '"':
-                quoted = True
-            elif character in "([{":
-                depth += 1
-            elif character in ")]}":
-                depth = max(0, depth - 1)
-            elif (
-                character == ":"
-                and index + 1 < len(normalized)
-                and normalized[index + 1] == "="
-                and depth == 0
-            ):
-                raise ValueError(
-                    "lean_statement must be a type expression, not a declaration"
-                )
-        return normalized
+        return validate_lean_statement(value)
 
 
 class SubproblemAudit(BaseModel):
