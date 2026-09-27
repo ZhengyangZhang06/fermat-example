@@ -359,6 +359,38 @@ class PreflightTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_interrupted_problem_fetch_recovers_from_frozen_site_data(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "mihailescu"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                runtime = Runtime(None, "prove it", runtime_config(), {})
+                runtime.problem_id = "mihailescu"
+                runtime.run_root.mkdir(parents=True, exist_ok=True)
+                session_path = runtime.run_root / "problem-session.json"
+                session_path.write_text(
+                    '{"problem_id":"mihailescu","status":"started"}\n',
+                    encoding="utf-8",
+                )
+
+                with patch.object(
+                    runtime, "_problem_site_data", return_value=problem_site_data()
+                ):
+                    recovered = runtime._fetched_problem()
+
+                self.assertEqual(recovered.problem_id, "mihailescu")
+                self.assertTrue((runtime.run_root / "problem-candidate.json").is_file())
+                self.assertTrue((runtime.run_root / "problem.json").is_file())
+                self.assertTrue(runtime.problem_path.is_file())
+                self.assertIn(
+                    "candidate-recovered-from-frozen-site-data",
+                    session_path.read_text(encoding="utf-8"),
+                )
+            finally:
+                os.chdir(original)
+
     def test_digest_identity_resumes_when_latest_points_to_another_task(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:

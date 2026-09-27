@@ -359,10 +359,38 @@ class Runtime:
                 ) from error
         else:
             if session_path.exists():
-                raise RuntimeError(
-                    "the one permitted acquisition session was interrupted before a valid "
-                    "candidate was saved; refusing to start a second session"
+                # The controller has already frozen and validated the complete v2 record.
+                # Recover deterministically after a killed fetcher instead of spending a
+                # second agent session; FetchedProblem has no fields absent from this
+                # record and the controller-owned renderer.
+                problem = site_data["problem"]
+                fetched = FetchedProblem(
+                    problem_id=problem["id"],
+                    title=problem["title"],
+                    source_url=PROBLEM_PAGE_URL.format(problem_id=self.problem_id),
+                    data_url=PROBLEM_DATA_URL.format(problem_id=self.problem_id),
+                    generated_at=site_data["generated_at"],
+                    statement_revision=problem["statement_revision"],
+                    module=problem["module"],
+                    markdown=self._render_problem_markdown(site_data),
                 )
+                atomic_text(candidate_path, fetched.model_dump_json(indent=2) + "\n")
+                atomic_text(
+                    session_path,
+                    json.dumps(
+                        {
+                            "problem_id": self.problem_id,
+                            "status": "candidate-recovered-from-frozen-site-data",
+                            "completed_at": now(),
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                )
+                atomic_text(self.problem_path, fetched.markdown.rstrip() + "\n")
+                fetched.markdown = self.problem_path.read_text(encoding="utf-8")
+                atomic_text(record_path, fetched.model_dump_json(indent=2) + "\n")
+                return fetched
             worker_config = getattr(self.agents.worker, "config", None)
             if not getattr(worker_config, "web_search", False):
                 raise RuntimeError(
