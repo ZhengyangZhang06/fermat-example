@@ -223,10 +223,36 @@ class Subproblem(BaseModel):
         normalized = value.strip()
         if "\n" in normalized or "\r" in normalized:
             raise ValueError("lean_statement must be a single line")
-        if ":=" in normalized:
-            raise ValueError(
-                "lean_statement must be a type expression, not a declaration"
-            )
+        # Named arguments such as ``(R := RingOfIntegers F)`` are ordinary and often
+        # indispensable inside a type expression.  Reject only a top-level ``:=``, which
+        # is the declaration/proof assignment this frozen interface must not contain.
+        depth = 0
+        quoted = False
+        escaped = False
+        for index, character in enumerate(normalized):
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    quoted = False
+                continue
+            if character == '"':
+                quoted = True
+            elif character in "([{":
+                depth += 1
+            elif character in ")]}":
+                depth = max(0, depth - 1)
+            elif (
+                character == ":"
+                and index + 1 < len(normalized)
+                and normalized[index + 1] == "="
+                and depth == 0
+            ):
+                raise ValueError(
+                    "lean_statement must be a type expression, not a declaration"
+                )
         return normalized
 
 

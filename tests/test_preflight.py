@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from _recursive_lean.models import FetchedProblem, NaturalProof, SolveResult
+from _recursive_lean.models import FetchedProblem, NaturalProof, SolveResult, Subproblem
 from _recursive_lean.preflight import (
     REFERENCE_SOURCES,
     ReferenceBundle,
@@ -181,6 +181,33 @@ class PreflightTests(unittest.TestCase):
                 proof="A sufficiently detailed numbered proof for the fixture.",
                 key_steps=["Conclude the fixture."],
                 unresolved=[],
+            )
+
+    def test_subproblem_type_allows_named_arguments_but_not_a_proof(self) -> None:
+        statement = (
+            "∀ (F : Type) [Field F], "
+            "IsDedekindDomain.selmerGroup "
+            "(R := NumberField.RingOfIntegers F) (K := F) (S := ∅) (n := 3) = "
+            "IsDedekindDomain.selmerGroup "
+            "(R := NumberField.RingOfIntegers F) (K := F) (S := ∅) (n := 3)"
+        )
+        made = Subproblem(
+            key="selmer_identity",
+            title="Selmer identity",
+            statement="The empty-place Selmer group is equal to itself.",
+            lean_statement=statement,
+            lean_name="selmer_identity",
+            depends_on=[],
+        )
+        self.assertEqual(made.lean_statement, statement)
+        with self.assertRaisesRegex(ValueError, "type expression"):
+            Subproblem(
+                key="invalid_proof",
+                title="Invalid proof",
+                statement="This fixture improperly contains a proof assignment.",
+                lean_statement="True := by trivial",
+                lean_name="invalid_proof",
+                depends_on=[],
             )
 
     def test_problem_id_is_resolved_before_the_agent_session(self) -> None:
