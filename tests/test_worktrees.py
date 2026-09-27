@@ -135,6 +135,46 @@ class WorktreeTests(unittest.TestCase):
         )
         self.assertIsNone(recovered)
 
+    def test_structured_turn_prefers_last_valid_concatenated_answer(self) -> None:
+        earlier = NaturalProof(
+            reference_use=reference_use(),
+            proof="A schema-valid subagent answer.",
+            key_steps=["Report to the root agent."],
+            unresolved=["The root agent has not finished."],
+        )
+        expected = NaturalProof(
+            reference_use=reference_use(),
+            proof="The root agent's complete numbered proof.",
+            key_steps=["Conclude the fixture."],
+            unresolved=[],
+        )
+        recovered = _structured_turn(
+            FailedAfterAnswer(
+                earlier.model_dump_json() + expected.model_dump_json()
+            ),
+            "prove it",
+            NaturalProof,
+        )
+        self.assertEqual(recovered, expected)
+
+    def test_structured_turn_rejects_valid_answer_followed_by_partial_json(
+        self,
+    ) -> None:
+        earlier = NaturalProof(
+            reference_use=reference_use(),
+            proof="A schema-valid subagent answer.",
+            key_steps=["Report to the root agent."],
+            unresolved=[],
+        )
+        recovered = _structured_turn(
+            FailedAfterAnswer(
+                earlier.model_dump_json() + '{"reference_use": ['
+            ),
+            "prove it",
+            NaturalProof,
+        )
+        self.assertIsNone(recovered)
+
     def test_structured_turn_does_not_salvage_nontransport_failure(self) -> None:
         expected = NaturalProof(
             reference_use=reference_use(),

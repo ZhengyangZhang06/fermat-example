@@ -103,15 +103,52 @@ def _structured_turn(session: Any, prompt: str, schema: Any) -> Any:
             raw = raw.decode("utf-8", errors="replace")
         if isinstance(raw, str):
             held = raw.strip()
-            candidates = [held]
+            try:
+                return schema.model_validate_json(held)
+            except (TypeError, ValueError):
+                pass
+
+            # A root turn may print a schema-constrained subagent result before its
+            # own answer.  In that case stdout can contain adjacent JSON documents,
+            # and slicing from the first ``{`` to the last ``}`` produces invalid
+            # JSON.  Decode complete top-level document chains and prefer the last
+            # schema-valid document.  If a chain ends in a partial JSON document,
+            # discard the whole chain rather than accidentally accepting an older
+            # subagent answer as the root answer.
+            decoder = json.JSONDecoder()
+            recovered: list[tuple[int, Any]] = []
+            for match in re.finditer(r"(?m)^\{", held):
+                position = match.start()
+                chain: list[tuple[int, Any]] = []
+                incomplete = False
+                while True:
+                    try:
+                        value, end = decoder.raw_decode(held, position)
+                    except json.JSONDecodeError:
+                        incomplete = True
+                        break
+                    try:
+                        parsed = schema.model_validate(value)
+                    except (TypeError, ValueError):
+                        parsed = None
+                    if parsed is not None:
+                        chain.append((end, parsed))
+                    position = end
+                    while position < len(held) and held[position].isspace():
+                        position += 1
+                    if position >= len(held) or held[position] != "{":
+                        break
+                if not incomplete:
+                    recovered.extend(chain)
+            if recovered:
+                return max(recovered, key=lambda item: item[0])[1]
+
             first, last = held.find("{"), held.rfind("}")
-            if 0 <= first < last:
-                candidates.append(held[first : last + 1])
-            for candidate in candidates:
+            if 0 <= first < last and "{" not in held[last + 1 :]:
                 try:
-                    return schema.model_validate_json(candidate)
+                    return schema.model_validate_json(held[first : last + 1])
                 except (TypeError, ValueError):
-                    continue
+                    pass
         return None
     except ValueError:
         return None
