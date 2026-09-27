@@ -208,7 +208,11 @@ class Runtime:
             run_dir=str(self.run_root.relative_to(self.project)),
             problem_id=problem.problem_id,
             problem_file=str(self.problem_path.relative_to(self.project)),
-            reference_manifest=str(self.reference_bundle.manifest.relative_to(self.project))
+            # A validated immutable reference library may be shared across many
+            # project supervisors through a symlink.  In that case its resolved
+            # manifest is intentionally outside this project, so persist the
+            # absolute path instead of requiring a project-relative one.
+            reference_manifest=str(self.reference_bundle.manifest)
             if self.reference_bundle is not None
             else "",
         )
