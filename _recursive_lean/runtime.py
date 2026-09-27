@@ -315,6 +315,8 @@ class Runtime:
             self.store.update(
                 "root", "interrupted", "resuming an interrupted root node"
             )
+        if self._speculation_enabled():
+            self._normalize_speculative_parent_states()
         print(f"Live DAG: {self.run_root / 'DAG.md'}")
         print(f"Fetched problem: {self.problem_path}")
         if self.reference_bundle is not None:
@@ -1900,6 +1902,36 @@ class Runtime:
         return bool(
             getattr(self.config, "speculative_parent_formalization", False)
         )
+
+    def _normalize_speculative_parent_states(self) -> None:
+        """Remove legacy waiting labels before any resumed workers are submitted."""
+        for node in list(self.store.nodes.values()):
+            if node.status != "waiting-children" or not node.children:
+                continue
+            digest, records = self._speculative_contract(node)
+            pending = [one for one in records if not self._accepted_checkpoint(one)]
+            if not pending:
+                status = "queued"
+                message = (
+                    "all real child candidates are accepted; final parent "
+                    "formalization is ready"
+                )
+            elif (
+                node.speculative_commit
+                and node.speculative_contract_digest == digest
+            ):
+                status = "speculative-ready"
+                message = (
+                    "parent Lean draft already exists under the exact frozen child "
+                    "interfaces; real child gates continue in parallel"
+                )
+            else:
+                status = "speculative-lean"
+                message = (
+                    "parent Lean coding is enabled immediately under exact frozen "
+                    "child assumptions"
+                )
+            self.store.update(node.id, status, message)
 
     def _speculative_contract(
         self, node: NodeRecord

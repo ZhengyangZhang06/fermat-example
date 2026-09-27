@@ -1912,6 +1912,73 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_speculative_startup_normalizes_every_waiting_parent(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "speculative_startup_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=4,
+                    speculative_parent_formalization=True,
+                )
+                runtime = Runtime(None, "speculative startup fixture", config, {})
+                ready_parent = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Ready parent",
+                    statement="Ready parent theorem",
+                )
+                ready_child = runtime.store.ensure(
+                    "root.ready-a1",
+                    parent="root",
+                    depth=1,
+                    title="Ready child",
+                    statement="Ready child theorem",
+                    lean_statement="True",
+                    lean_name="ready_child",
+                )
+                pending_parent = runtime.store.ensure(
+                    "root.pending-parent-a1",
+                    parent="root",
+                    depth=1,
+                    title="Pending parent",
+                    statement="Pending parent theorem",
+                )
+                pending_child = runtime.store.ensure(
+                    "root.pending-parent-a1.child-a1",
+                    parent=pending_parent.id,
+                    depth=2,
+                    title="Pending child",
+                    statement="Pending child theorem",
+                    lean_statement="True",
+                    lean_name="pending_child",
+                )
+                ready_parent.children = [ready_child.id, pending_parent.id]
+                pending_parent.children = [pending_child.id]
+                ready_parent.status = "waiting-children"
+                pending_parent.status = "waiting-children"
+                ready_child.status = "proved"
+                pending_parent.status = "waiting-children"
+                pending_child.status = "natural-proof"
+
+                runtime._normalize_speculative_parent_states()
+
+                self.assertEqual(ready_parent.status, "speculative-lean")
+                self.assertEqual(pending_parent.status, "speculative-lean")
+                self.assertFalse(
+                    any(
+                        node.status == "waiting-children"
+                        for node in runtime.store.nodes.values()
+                    )
+                )
+            finally:
+                os.chdir(original)
+
 
 if __name__ == "__main__":
     unittest.main()
