@@ -224,6 +224,31 @@ class PreflightTests(unittest.TestCase):
                 lean_name="invalid_proof",
                 depends_on=[],
             )
+        with self.assertRaisesRegex(ValueError, "Matrix.of"):
+            Subproblem(
+                key="wrong_matrix_instance",
+                title="Wrong matrix instance",
+                statement="This fixture accidentally selects pointwise multiplication.",
+                lean_statement=(
+                    "∀ u : Fin 3 → Fin 3 → ℤ, "
+                    "IsUnit (fun r c : Fin 3 => u r c : Matrix (Fin 3) (Fin 3) ℤ)"
+                ),
+                lean_name="wrong_matrix_instance",
+                depends_on=[],
+            )
+        corrected_matrix_statement = (
+            "∀ u : Fin 3 → Fin 3 → ℤ, "
+            "IsUnit (Matrix.of (fun r c : Fin 3 => u r c))"
+        )
+        corrected_matrix = Subproblem(
+            key="matrix_instance",
+            title="Matrix instance",
+            statement="This fixture selects ordinary matrix multiplication.",
+            lean_statement=corrected_matrix_statement,
+            lean_name="matrix_instance",
+            depends_on=[],
+        )
+        self.assertEqual(corrected_matrix.lean_statement, corrected_matrix_statement)
         for unsafe in (
             "theorem injected : True := by trivial",
             "True) := by exact True.intro --",

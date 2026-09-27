@@ -10,6 +10,7 @@ _DECLARATION_PREFIX = re.compile(
     r"inductive|coinductive|namespace|section|end|import)\b"
 )
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_']")
+_RAW_MATRIX_IS_UNIT = re.compile(r"\bIsUnit\s*\(\s*fun\b.*?:\s*Matrix\b")
 
 
 def validate_lean_statement(value: str) -> str:
@@ -27,6 +28,11 @@ def validate_lean_statement(value: str) -> str:
         raise ValueError("lean_statement must be a single line")
     if _DECLARATION_PREFIX.match(normalized):
         raise ValueError("lean_statement must be a type expression, not a declaration")
+    if _RAW_MATRIX_IS_UNIT.search(normalized):
+        raise ValueError(
+            "lean_statement must wrap a constructed matrix in Matrix.of before IsUnit "
+            "to select matrix multiplication instead of pointwise function multiplication"
+        )
 
     stack: list[str] = []
     pairs = {")": "(", "]": "[", "}": "{"}

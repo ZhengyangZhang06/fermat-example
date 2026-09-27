@@ -191,6 +191,10 @@ implementation and comparator will refer to that declaration as `Submission.X`. 
 without `theorem`, a declaration name, or `:=` proof. It must elaborate after `import Submission`
 before child proof work begins. This type is frozen and later becomes the independent challenge
 side of the child comparator. Dependencies must be acyclic.
+When a typeclass-sensitive object is constructed inline, verify the inferred instance rather than
+only checking that the proposition elaborates. In particular, write `IsUnit (Matrix.of (fun ...))`
+for a constructed square matrix: `IsUnit (fun ... : Matrix ...)` silently selects pointwise
+function multiplication instead of matrix multiplication.
 Return no children when the theorem is already atomic or depth {depth} reached the limit
 {max_depth}. Do not use `sorry`, placeholders, or circular restatements of the parent.
 
@@ -220,6 +224,10 @@ The frozen Lean type must be independently usable as the challenge side of a com
 a full declaration, proof, placeholder, post-hoc alias type, or type that depends on the child
 being implemented already. For a split, return exactly one node audit for every key. For an
 atomic theorem, return an empty node list and judge the no-split rationale.
+Independently verify typeclass-sensitive inline constructions. Reject `IsUnit (fun ... : Matrix
+...)`; it selects pointwise function multiplication. The intended matrix-unit contract must use
+`IsUnit (Matrix.of (fun ...))` (or another expression whose inferred instance is demonstrably the
+ordinary matrix semiring).
 
 {problem_context}
 
