@@ -274,6 +274,10 @@ Requirements:
   deliberately subtracts its frozen warning baseline, so an inherited root `sorry` is not a child
   failure. A warning-clean child means that this candidate introduces no new warning. Add the
   selected child theorem beside the baseline declarations.
+- For a non-root node, do not use a whole-file `lake --wfail` or `-DwarningAsError=true` run as an
+  acceptance gate: it cannot distinguish the expected inherited root warning. Ordinary compilation
+  is useful during development, but the exact configured child comparator below is authoritative
+  for baseline-aware warning cleanliness.
 - Do not add any new `sorry`, `admit`, axiom, unsafe loophole, or weakened replacement theorem.
 - Run `{comparator_command}` until it exits zero and contains `{comparator_success}`.
 - For a non-root node, that exact node comparator is the complete configured correctness gate.

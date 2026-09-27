@@ -408,6 +408,7 @@ class WorktreeTests(unittest.TestCase):
                 self.assertIn("empty list does not ban proof-base helpers", RLCR_LEAN_TASK)
                 self.assertIn("Preserve that inherited placeholder", RLCR_LEAN_TASK)
                 self.assertIn("introduces no new warning", RLCR_LEAN_TASK)
+                self.assertIn("cannot distinguish the expected inherited root warning", RLCR_LEAN_TASK)
             finally:
                 os.chdir(original)
 
