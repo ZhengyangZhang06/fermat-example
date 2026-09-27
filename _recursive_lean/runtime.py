@@ -902,6 +902,14 @@ class Runtime:
                     f"{one.node_id}: {one.feedback}" for one in failed
                 )
                 continue
+            dependency_problem = self._wait_for_accepted_dependencies(node)
+            if dependency_problem:
+                self.store.update(node.id, "failed", dependency_problem)
+                return SolveResult(
+                    ok=False,
+                    node_id=node.id,
+                    feedback=dependency_problem,
+                )
             result = self._formalize(node, plan, natural, children)
             if result.ok:
                 return result
@@ -1262,12 +1270,14 @@ class Runtime:
         decomposition: Decomposition,
         parent_attempt: int,
     ) -> list[SolveResult]:
-        """Activate or reuse theorem workers recursively in dependency order.
+        """Activate every theorem worker, gating only dependency-consuming Lean work.
 
         A Lean theorem name is the stable identity of a child below one parent.  Outer
         retries may revise prose or decomposition, but they may not create ``-a2`` copies
         of an already accepted ``-a1`` theorem or send that theorem through proof stages
-        again.
+        again.  Sibling dependencies do not prevent planning, research, natural-language
+        proof, or recursive decomposition.  Each worker pauses at ``waiting-lean`` before
+        formalization until its accepted prerequisite checkpoints are available.
         """
         del parent_attempt
         if not decomposition.should_split:
@@ -1337,82 +1347,41 @@ class Runtime:
             f"activated {len(made)} recursive theorem workers",
         )
         results: dict[str, SolveResult] = {}
-        by_key = {one.key: one for one in decomposition.subproblems}
-        pending = set(by_key)
-        workers = min(self.config.max_parallel_children, max(1, len(pending)))
+        ordered_keys = self._topological(decomposition.subproblems)
+        workers = min(self.config.max_parallel_children, max(1, len(ordered_keys)))
         with ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix=f"recursive-{slug(parent.id)}",
         ) as executor:
             futures: dict[Any, str] = {}
-            while pending or futures:
-                progressed = False
-                for key in sorted(pending):
-                    child = by_key[key]
-                    dependency_failure = next(
-                        (
-                            results[dependency]
-                            for dependency in child.depends_on
-                            if dependency in results and not results[dependency].ok
-                        ),
-                        None,
+            for key in ordered_keys:
+                checkpoint = made[key]
+                if checkpoint.status == "proved":
+                    results[key] = SolveResult(
+                        ok=True,
+                        node_id=checkpoint.id,
+                        theorems=self._checkpoint_theorems(checkpoint),
                     )
-                    if dependency_failure is not None:
-                        result = SolveResult(
+                elif (
+                    checkpoint.status == "integrating" and checkpoint.candidate_commit
+                ):
+                    theorems = self._checkpoint_theorems(checkpoint)
+                    if not theorems:
+                        results[key] = SolveResult(
                             ok=False,
-                            node_id=made[key].id,
-                            feedback=f"dependency {dependency_failure.node_id} failed",
+                            node_id=checkpoint.id,
+                            feedback="accepted checkpoint lacks durable reviewer metadata",
                         )
-                        self.store.update(made[key].id, "failed", result.feedback)
-                        results[key] = result
-                        pending.remove(key)
-                        progressed = True
-                        continue
-                    if all(dependency in results for dependency in child.depends_on):
-                        pending.remove(key)
-                        checkpoint = made[key]
-                        if checkpoint.status == "proved":
-                            results[key] = SolveResult(
-                                ok=True,
-                                node_id=checkpoint.id,
-                                theorems=self._checkpoint_theorems(checkpoint),
-                            )
-                        elif (
-                            checkpoint.status == "integrating"
-                            and checkpoint.candidate_commit
-                        ):
-                            theorems = self._checkpoint_theorems(checkpoint)
-                            if not theorems:
-                                result = SolveResult(
-                                    ok=False,
-                                    node_id=checkpoint.id,
-                                    feedback=(
-                                        "accepted checkpoint lacks durable reviewer metadata"
-                                    ),
-                                )
-                                results[key] = result
-                            else:
-                                self._submit_resumed_integration(checkpoint)
-                                results[key] = SolveResult(
-                                    ok=True,
-                                    node_id=checkpoint.id,
-                                    theorems=theorems,
-                                )
-                        else:
-                            futures[executor.submit(self._solve, checkpoint)] = key
-                        progressed = True
-                if not futures:
-                    if pending and not progressed:
-                        for key in sorted(pending):
-                            result = SolveResult(
-                                ok=False,
-                                node_id=made[key].id,
-                                feedback="no dependency-ready node in child DAG",
-                            )
-                            self.store.update(made[key].id, "failed", result.feedback)
-                            results[key] = result
-                        pending.clear()
-                    continue
+                    else:
+                        self._submit_resumed_integration(checkpoint)
+                        results[key] = SolveResult(
+                            ok=True,
+                            node_id=checkpoint.id,
+                            theorems=theorems,
+                        )
+                else:
+                    futures[executor.submit(self._solve, checkpoint)] = key
+            while futures:
                 done, _ = wait(tuple(futures), return_when=FIRST_COMPLETED)
                 for future in done:
                     key = futures.pop(future)
@@ -1427,6 +1396,54 @@ class Runtime:
                         self.store.update(made[key].id, "failed", result.feedback)
                         results[key] = result
         return [results[one.key] for one in decomposition.subproblems]
+
+    def _wait_for_accepted_dependencies(self, node: NodeRecord) -> str:
+        """Pause only the Lean phase until every sibling prerequisite is accepted."""
+        if not node.depends_on:
+            return ""
+        announced: tuple[str, ...] = ()
+        while True:
+            with self._graph_lock:
+                missing_records = [
+                    self.store.nodes.get(dependency) for dependency in node.depends_on
+                ]
+                unknown = [
+                    dependency
+                    for dependency, record in zip(
+                        node.depends_on, missing_records, strict=True
+                    )
+                    if record is None
+                ]
+                failed = [
+                    record
+                    for record in missing_records
+                    if record is not None and record.status == "failed"
+                ]
+                waiting = [
+                    record
+                    for record in missing_records
+                    if record is not None and not self._accepted_checkpoint(record)
+                ]
+            if unknown:
+                return "unknown prerequisite node(s): " + ", ".join(unknown)
+            if failed:
+                return "failed prerequisite node(s): " + ", ".join(
+                    record.id for record in failed
+                )
+            if not waiting:
+                return ""
+            current = tuple(record.id for record in waiting)
+            if current != announced:
+                self.store.update(
+                    node.id,
+                    "waiting-lean",
+                    (
+                        "natural proof/decomposition ready; Lean waits for accepted "
+                        "prerequisite(s): " + ", ".join(current)
+                    ),
+                )
+                announced = current
+            time.sleep(0.5)
 
     def _resume_existing_dag(self, root: NodeRecord) -> SolveResult:
         """Launch the entire dependency-ready frontier of an existing DAG.
@@ -1459,6 +1476,29 @@ class Runtime:
             self._wait_for_integrations()
             return self._resume_accepted_candidate(root)
 
+        dependency_levels: dict[str, int] = {}
+
+        def dependency_level(node_id: str, active: set[str] | None = None) -> int:
+            if node_id in dependency_levels:
+                return dependency_levels[node_id]
+            active = set() if active is None else active
+            if node_id in active:
+                return len(managed)
+            active.add(node_id)
+            node = self.store.nodes[node_id]
+            internal = [one for one in node.depends_on if one in managed]
+            level = (
+                0
+                if not internal
+                else 1
+                + max(
+                    dependency_level(dependency, active.copy())
+                    for dependency in internal
+                )
+            )
+            dependency_levels[node_id] = level
+            return level
+
         def ready_nodes() -> list[NodeRecord]:
             ready: list[NodeRecord] = []
             for node_id in sorted(managed):
@@ -1472,18 +1512,19 @@ class Runtime:
                     self._submit_resumed_integration(node)
                     scheduled.add(node_id)
                     continue
-                if any(
-                    not self._accepted_checkpoint(self.store.nodes[dependency])
-                    for dependency in node.depends_on
-                ):
-                    continue
-                if node.children and any(
-                    not self._accepted_checkpoint(self.store.nodes[child])
-                    for child in node.children
-                ):
-                    continue
+                if node.children:
+                    if any(
+                        not self._accepted_checkpoint(self.store.nodes[dependency])
+                        for dependency in node.depends_on
+                    ):
+                        continue
+                    if any(
+                        not self._accepted_checkpoint(self.store.nodes[child])
+                        for child in node.children
+                    ):
+                        continue
                 ready.append(node)
-            return ready
+            return sorted(ready, key=lambda one: (dependency_level(one.id), one.id))
 
         with ThreadPoolExecutor(
             max_workers=workers,

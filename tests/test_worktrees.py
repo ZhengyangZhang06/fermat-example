@@ -1122,7 +1122,7 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
-    def test_child_frontier_refills_without_waiting_for_slow_sibling(self) -> None:
+    def test_all_child_proof_workers_start_before_dependencies_finish(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "frontier_problem"
@@ -1190,7 +1190,51 @@ class WorktreeTests(unittest.TestCase):
                 results = runtime._solve_children(parent, decomposition, 1)
 
                 self.assertTrue(all(result.ok for result in results))
+                self.assertLess(moments["start:after_fast"], moments["end:fast"])
                 self.assertLess(moments["start:after_fast"], moments["end:slow"])
+            finally:
+                os.chdir(original)
+
+    def test_dependency_gate_waits_only_before_lean(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "dependency_gate_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=2,
+                )
+                runtime = Runtime(None, "dependency gate fixture", config, {})
+                prerequisite = runtime.store.ensure(
+                    "root.prerequisite-a1",
+                    parent="root",
+                    depth=1,
+                    title="Prerequisite",
+                    statement="A prerequisite theorem",
+                )
+                dependent = runtime.store.ensure(
+                    "root.dependent-a1",
+                    parent="root",
+                    depth=1,
+                    title="Dependent",
+                    statement="A dependent theorem",
+                    depends_on=[prerequisite.id],
+                )
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        runtime._wait_for_accepted_dependencies, dependent
+                    )
+                    deadline = time.monotonic() + 2
+                    while dependent.status != "waiting-lean":
+                        self.assertLess(time.monotonic(), deadline)
+                        time.sleep(0.01)
+                    self.assertFalse(future.done())
+                    prerequisite.status = "integrating"
+                    prerequisite.candidate_commit = "accepted-candidate"
+                    self.assertEqual(future.result(timeout=2), "")
             finally:
                 os.chdir(original)
 
