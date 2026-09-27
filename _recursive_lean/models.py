@@ -370,6 +370,8 @@ NodeStatus = Literal[
     "natural-review",
     "decomposing",
     "waiting-children",
+    "speculative-lean",
+    "speculative-ready",
     "waiting-lean",
     "rlcr-lean",
     "comparing",
@@ -404,6 +406,11 @@ class NodeRecord(BaseModel):
     proof_base_commit: str = ""
     candidate_commit: str = ""
     integrated_commit: str = ""
+    speculative_worktree: str = ""
+    speculative_branch: str = ""
+    speculative_base_commit: str = ""
+    speculative_commit: str = ""
+    speculative_contract_digest: str = ""
     children: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     theorems: list[str] = Field(default_factory=list)

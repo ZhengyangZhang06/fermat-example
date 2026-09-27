@@ -328,6 +328,21 @@ class Store:
     def _scheduling(self, record: NodeRecord) -> str:
         """Explain decomposition shape separately from dependency readiness."""
         shape = "decomposition leaf" if not record.children else "decomposed node"
+        unfinished_children = [
+            child
+            for child in record.children
+            if child in self.nodes and self.nodes[child].status != "proved"
+        ]
+        if record.status in {"speculative-lean", "speculative-ready"}:
+            phase = (
+                "parent Lean coding active"
+                if record.status == "speculative-lean"
+                else "parent Lean draft ready"
+            )
+            return (
+                f"{shape}; speculative {phase}; "
+                f"{len(unfinished_children)} real child gate(s) in flight"
+            )
         blocked = [
             dependency
             for dependency in record.depends_on
@@ -335,11 +350,6 @@ class Store:
         ]
         if blocked:
             return f"{shape}; blocked by: {', '.join(blocked)}"
-        unfinished_children = [
-            child
-            for child in record.children
-            if child in self.nodes and self.nodes[child].status != "proved"
-        ]
         if unfinished_children:
             return f"{shape}; waiting for {len(unfinished_children)} child theorem(s)"
         if record.status == "proved":

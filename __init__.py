@@ -48,6 +48,14 @@ class Config(BaseModel):
             "global worker-pool size for every dependency-ready node in the DAG"
         ),
     )
+    speculative_parent_formalization: bool = Field(
+        default=False,
+        description=(
+            "start a decomposed parent's Lean draft immediately against temporary "
+            "exact-type child assumptions; real child proofs remain mandatory for "
+            "comparison and acceptance"
+        ),
+    )
     max_nodes: int = Field(
         default=24,
         ge=1,

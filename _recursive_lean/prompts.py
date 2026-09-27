@@ -310,6 +310,41 @@ configured comparator. Architectural preferences copied from an older scaffold a
 after the current decomposition and its child gates have been accepted.
 """
 
+SPECULATIVE_PARENT_TASK = """Draft the Lean proof of decomposed DAG node `{node_id}` now,
+while its child workers continue in parallel.
+
+{problem_context}
+
+{reference_context}
+
+Exact parent theorem:
+{statement}
+
+Parent declaration name: `{lean_name}`
+Frozen parent type: `{lean_statement}`
+Accepted natural-language proof: `{natural_path}`
+One-time scaffold: `{plan_path}`
+Lean target: `{lean_target}`
+
+The controller has installed temporary declarations with the exact frozen types below solely in
+this isolated speculative worktree:
+
+{children}
+
+Treat every listed child as proved and implement the parent immediately. Read the accepted natural
+proof and all three mandatory local reference sources before editing. Use the exact child names in
+the proof so the real declarations can replace the temporary assumptions without changing the
+parent argument.
+
+This is a speculative coding pass, not an acceptance gate. Compile the relevant Lean targets as
+far as the temporary declarations permit, but do not run the official comparator and do not wait
+for child workers. Do not edit or copy the controller-generated speculative-assumption module,
+do not create any other axiom, `sorry`, `admit`, unsafe mechanism, or weaker theorem, and do not
+commit. Leave the useful parent Lean edits in the worktree; the controller will remove every
+temporary assumption and preserve only safe participant-source changes as a speculative draft.
+"""
+
+
 LEAN_AUDIT = """Review the Lean proof for this DAG node. You did not write it, and approval is
 forbidden unless you personally rerun the exact comparator command shown below. Inspect the git
 diff and the named Lean files. Check for weakened statements, changed challenge files/imports,

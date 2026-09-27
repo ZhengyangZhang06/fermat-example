@@ -1707,6 +1707,168 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_speculative_parent_draft_removes_temporary_assumptions(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "speculative_parent_problem"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text(
+                "import Mathlib\n\nnamespace Submission\n\n"
+                "theorem root_theorem : True := by\n  sorry\n\nend Submission\n"
+            )
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize speculative fixture")
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    reference_dir=".humanize/math-reference-library",
+                    max_parallel_children=4,
+                    speculative_parent_formalization=True,
+                    lean_target="Submission.lean",
+                )
+                runtime = Runtime(None, "speculative parent fixture", config, {})
+                parent = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Root theorem",
+                    statement="Root theorem",
+                    lean_name="root_theorem",
+                )
+                child = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Child theorem",
+                    statement="Child theorem",
+                    lean_statement="True",
+                    lean_name="child_theorem",
+                )
+                parent.attempts = 1
+                node_dir = runtime._node_dir(parent)
+                plan = node_dir / "plan-v1.md"
+                natural = node_dir / "natural-proof-v1.md"
+                plan.write_text("# Frozen plan\n")
+                natural.write_text("1. Apply the child theorem.\n")
+                parent.plan = str(plan.relative_to(project))
+                parent.natural_proof = str(natural.relative_to(project))
+
+                def draft(
+                    node: NodeRecord, worktree: Path, prompt: str
+                ) -> str:
+                    del node
+                    self.assertIn("Submission.child_theorem : True", prompt)
+                    target = worktree / "Submission.lean"
+                    source = target.read_text()
+                    self.assertIn(
+                        "import Submission.HumanizeSpeculativeChildren", source
+                    )
+                    target.write_text(
+                        source.replace("  sorry", "  exact child_theorem")
+                    )
+                    return "drafted against the frozen child interface"
+
+                digest, records = runtime._speculative_contract(parent)
+                with patch.object(runtime, "_run_speculative_agent", side_effect=draft):
+                    result = runtime._speculate_checkpoint_parent(
+                        parent, digest, records
+                    )
+
+                self.assertTrue(result.ok, result.feedback)
+                self.assertEqual(parent.status, "speculative-ready")
+                self.assertTrue(parent.speculative_commit)
+                saved = git(
+                    project,
+                    "show",
+                    "--format=",
+                    "--no-ext-diff",
+                    parent.speculative_commit,
+                )
+                self.assertIn("exact child_theorem", saved)
+                self.assertNotIn("HumanizeSpeculativeChildren", saved)
+                self.assertNotIn("axiom child_theorem", saved)
+
+                parent_worktree = runtime._node_worktree(parent)
+                passed, feedback = runtime._overlay_speculative_parent(
+                    parent, parent_worktree
+                )
+                self.assertTrue(passed, feedback)
+                self.assertIn(
+                    "exact child_theorem",
+                    (parent_worktree / "Submission.lean").read_text(),
+                )
+            finally:
+                os.chdir(original)
+
+    def test_speculative_mode_launches_parent_with_children(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "speculative_scheduler_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_nodes=10,
+                    max_parallel_children=4,
+                    speculative_parent_formalization=True,
+                )
+                runtime = Runtime(None, "speculative scheduler fixture", config, {})
+                parent = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Root",
+                    statement="Root theorem",
+                )
+                decomposition = Decomposition(
+                    reference_use=reference_use(),
+                    should_split=True,
+                    rationale="two independent child interfaces",
+                    subproblems=[
+                        Subproblem(
+                            key="first",
+                            title="First child",
+                            statement="The first child theorem",
+                            lean_statement="True",
+                            lean_name="first_child",
+                            depends_on=[],
+                        ),
+                        Subproblem(
+                            key="second",
+                            title="Second child",
+                            statement="The second child theorem",
+                            lean_statement="True",
+                            lean_name="second_child",
+                            depends_on=[],
+                        ),
+                    ],
+                )
+
+                def solve(node: NodeRecord) -> SolveResult:
+                    node.status = "proved"
+                    return SolveResult(ok=True, node_id=node.id)
+
+                runtime._solve = solve  # type: ignore[method-assign]
+                with patch.object(
+                    runtime, "_submit_speculative_parent", return_value=None
+                ) as submit:
+                    results = runtime._solve_children(parent, decomposition, 1)
+
+                self.assertTrue(all(result.ok for result in results))
+                submit.assert_called_once_with(parent)
+                self.assertEqual(parent.status, "speculative-lean")
+                self.assertNotEqual(parent.status, "waiting-children")
+            finally:
+                os.chdir(original)
+
 
 if __name__ == "__main__":
     unittest.main()

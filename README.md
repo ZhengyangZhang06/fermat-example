@@ -273,9 +273,15 @@ blocking prerequisite.
   the merged candidate before advancing the problem branch. A failed combined check retains the
   accepted proof and runs integration-only repair followed by another machine comparator and a
   fresh reviewer comparator; it does not restart the theorem or NL proof.
-- A decomposed parent may start from comparator-approved child candidates while they integrate;
-  its isolated worktree overlays those exact commits and rechecks the combination. The root cannot
-  become `proved` until all descendant integration gates and its own final comparator contract pass.
+- With `speculative_parent_formalization`, a decomposed parent starts Lean coding immediately
+  against controller-generated temporary declarations carrying its children's exact frozen types.
+  The temporary declarations exist only in an isolated speculative worktree and are removed before
+  the controller records the draft commit. The parent then appears as `speculative-lean` or
+  `speculative-ready`, never idle as `waiting-children`. Comparator and reviewer gates remain
+  disabled for that draft until real child candidates replace every assumption. A parent may also
+  consume comparator-approved child candidates while they integrate; its final isolated worktree
+  overlays those exact commits and rechecks the combination. The root cannot become `proved` until
+  all descendant integration gates and its own final comparator contract pass.
 - Every node records a frozen proof-base commit. Kernel-checked definitions and helper lemmas at
   that base may be reused as library infrastructure; the child list governs only post-base
   candidate overlays and is not an exhaustive theorem allowlist.
@@ -287,10 +293,12 @@ blocking prerequisite.
 
 On resume, the scheduler scans the complete persisted DAG. Every node whose dependencies have
 passed both isolated comparator gates enters the global frontier together, up to
-`max_parallel_children`. Accepted `integrating` nodes unlock dependants immediately; their exact
-candidate commits are overlaid into the dependant's isolated worktree. Planning, natural-language
-proof, decomposition, Lean implementation, comparator passes, parent proving, and serialized
-integration can therefore overlap. Same-file reconciliations are performed in a separate
+`max_parallel_children`. In speculative mode, every decomposed parent also starts immediately
+against exact-type temporary child assumptions while those child workers continue. Accepted
+`integrating` nodes unlock dependants immediately; their exact candidate commits are overlaid into
+the dependant's isolated worktree. Planning, natural-language proof, decomposition, speculative
+parent coding, Lean implementation, comparator passes, and serialized integration can therefore
+overlap. Same-file reconciliations are performed in a separate
 integration worktree and comparator-checked before the canonical branch advances. Any
 reconciliation failure remains in an integration-only repair loop; the accepted node branch,
 scaffold, NL proof, comparator result, reviewer result, theorem identity, and wiki page remain

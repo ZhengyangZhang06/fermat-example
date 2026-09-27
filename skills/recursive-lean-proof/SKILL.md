@@ -106,8 +106,14 @@ is a circular wait.
 Scan the whole existing DAG and launch every dependency-ready frontier node into a shared worker
 pool. Refill the pool as soon as any completion unlocks another node; do not wait for an unrelated
 slow branch. Fresh decompositions launch every zero-indegree sibling in the first topological
-wave. Planning, natural-proof review, decomposition, Lean formalization, comparator runs, and Lean
-review may proceed concurrently. Give every formalizing node its own named Git branch and
+wave. When speculative parent formalization is enabled, launch the parent at the same time under
+controller-generated temporary declarations with every child's exact frozen Lean type. Keep those
+assumptions only in the isolated speculative worktree, remove them before recording the reusable
+parent draft, and never expose that draft to a comparator or reviewer until real accepted child
+histories replace all assumptions. Show such a parent as `speculative-lean` or
+`speculative-ready`, not `waiting-children`. Planning, natural-proof review, decomposition, parent
+speculation, Lean formalization, comparator runs, and Lean review may proceed concurrently. Give
+every formalizing node its own named Git branch and
 worktree, and invoke nested RLCR in a separate process whose real working directory is that
 worktree, so Humanize state, source edits, and comparator scratch files are isolated. Serialize
 integration of fully comparator- and reviewer-approved histories into the problem branch. When

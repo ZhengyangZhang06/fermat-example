@@ -55,6 +55,7 @@ from .prompts import (
     NATURAL_PROOF,
     PLAN_DRAFT,
     RLCR_LEAN_TASK,
+    SPECULATIVE_PARENT_TASK,
 )
 from .store import Store, atomic_text, now, slug
 
@@ -237,11 +238,17 @@ class Runtime:
         self._integration_lock = threading.Lock()
         self._revision_lock = threading.Lock()
         self._integration_futures_lock = threading.RLock()
+        self._speculation_futures_lock = threading.RLock()
         self._integration_executor = ThreadPoolExecutor(
             max_workers=max(1, getattr(self.config, "max_parallel_children", 4)),
             thread_name_prefix="accepted-integration",
         )
+        self._speculation_executor = ThreadPoolExecutor(
+            max_workers=max(1, getattr(self.config, "max_parallel_children", 4)),
+            thread_name_prefix="speculative-parent",
+        )
         self._integration_futures: dict[str, Any] = {}
+        self._speculation_futures: dict[str, Any] = {}
         self.run_root = self._run_root()
         self.store = Store(
             self.run_root,
@@ -902,6 +909,7 @@ class Runtime:
                     f"{one.node_id}: {one.feedback}" for one in failed
                 )
                 continue
+            self._wait_for_speculation(node)
             dependency_problem = self._wait_for_accepted_dependencies(node)
             if dependency_problem:
                 self.store.update(node.id, "failed", dependency_problem)
@@ -1367,11 +1375,22 @@ class Runtime:
             if parent.children != retained_children:
                 parent.children = retained_children
                 self.store.render()
-        self.store.update(
-            parent.id,
-            "waiting-children",
-            f"activated {len(made)} recursive theorem workers",
-        )
+        if self._speculation_enabled():
+            self.store.update(
+                parent.id,
+                "speculative-lean",
+                (
+                    f"activated {len(made)} recursive theorem workers; parent Lean "
+                    "starts now under exact frozen child assumptions"
+                ),
+            )
+            self._submit_speculative_parent(parent)
+        else:
+            self.store.update(
+                parent.id,
+                "waiting-children",
+                f"activated {len(made)} recursive theorem workers",
+            )
         results: dict[str, SolveResult] = {}
         ordered_keys = self._topological(decomposition.subproblems)
         workers = min(self.config.max_parallel_children, max(1, len(ordered_keys)))
@@ -1552,6 +1571,12 @@ class Runtime:
                 ready.append(node)
             return sorted(ready, key=lambda one: (dependency_level(one.id), one.id))
 
+        if self._speculation_enabled():
+            for node_id in sorted(managed):
+                node = self.store.nodes[node_id]
+                if node.children:
+                    self._submit_speculative_parent(node)
+
         with ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix=f"frontier-{slug(root.id)}",
@@ -1606,7 +1631,8 @@ class Runtime:
         )
 
     def _formalize_checkpoint_parent(self, node: NodeRecord) -> SolveResult:
-        """Finish a resumed parent after all of its existing children are proved."""
+        """Finalize a resumed parent after its real children replace any assumptions."""
+        self._wait_for_speculation(node)
         plan = self._recorded_plan(node) or self._preserved_plan(node)
         if plan is None or not node.natural_proof:
             return SolveResult(
@@ -1869,6 +1895,473 @@ class Runtime:
                 comparator_log=comparator_log or "Comparator passed.",
             )
 
+    def _speculation_enabled(self) -> bool:
+        """Whether decomposed parents should code against frozen child interfaces."""
+        return bool(
+            getattr(self.config, "speculative_parent_formalization", False)
+        )
+
+    def _speculative_contract(
+        self, node: NodeRecord
+    ) -> tuple[str, list[NodeRecord]]:
+        """Return a stable digest and exact records assumed by a speculative parent."""
+        records = [
+            self.store.nodes[node_id]
+            for node_id in dict.fromkeys([*node.children, *node.depends_on])
+            if node_id in self.store.nodes
+        ]
+        material = "\n".join(
+            "\0".join(
+                (
+                    record.id,
+                    record.lean_name,
+                    record.lean_statement.strip(),
+                )
+            )
+            for record in sorted(records, key=lambda one: one.id)
+        )
+        return hashlib.sha256(material.encode()).hexdigest(), records
+
+    def _submit_speculative_parent(self, node: NodeRecord) -> Any | None:
+        """Start one non-accepting parent proof concurrently with real child workers."""
+        if (
+            not self._speculation_enabled()
+            or not node.children
+            or self._accepted_checkpoint(node)
+        ):
+            return None
+        digest, records = self._speculative_contract(node)
+        pending = [one for one in records if not self._accepted_checkpoint(one)]
+        if not pending:
+            return None
+        if (
+            node.speculative_commit
+            and node.speculative_contract_digest == digest
+        ):
+            if node.status not in {
+                "rlcr-lean",
+                "comparing",
+                "lean-review",
+                "integrating",
+                "proved",
+            }:
+                self.store.update(
+                    node.id,
+                    "speculative-ready",
+                    (
+                        "parent Lean draft already exists under the exact frozen child "
+                        "interfaces; real child gates continue in parallel"
+                    ),
+                )
+            return None
+        with self._speculation_futures_lock:
+            existing = self._speculation_futures.get(node.id)
+            if existing is not None:
+                return existing
+            self.store.update(
+                node.id,
+                "speculative-lean",
+                (
+                    "parent Lean coding launched immediately under exact frozen child "
+                    "assumptions"
+                ),
+            )
+            future = self._speculation_executor.submit(
+                self._speculate_checkpoint_parent,
+                node,
+                digest,
+                records,
+            )
+            self._speculation_futures[node.id] = future
+            return future
+
+    def _wait_for_speculation(self, node: NodeRecord) -> None:
+        """Join only this parent's draft before its real proof worktree consumes it."""
+        with self._speculation_futures_lock:
+            future = self._speculation_futures.get(node.id)
+        if future is None:
+            future = self._submit_speculative_parent(node)
+        if future is None:
+            return
+        try:
+            result = future.result()
+            if not result.ok and not self._accepted_checkpoint(node):
+                self.store.update(
+                    node.id,
+                    "speculative-lean",
+                    (
+                        "speculative draft is incomplete; final RLCR will continue from "
+                        f"the real child overlay: {result.feedback}"
+                    ),
+                )
+        except Exception as error:  # noqa: BLE001
+            if not self._accepted_checkpoint(node):
+                self.store.update(
+                    node.id,
+                    "speculative-lean",
+                    f"speculative draft failed non-fatally and final RLCR will repair: {error}",
+                )
+
+    def _run_speculative_agent(
+        self, node: NodeRecord, worktree: Path, prompt: str
+    ) -> Any:
+        """Run the ordinary worker once; acceptance remains outside this pass."""
+        del node
+        return _WorkspaceAgent(self.agents.worker.clone(), worktree)(
+            prompt,
+            suppress=True,
+        )
+
+    @staticmethod
+    def _remove_speculative_import(target: Path) -> None:
+        """Remove the controller-only import without reverting the agent's proof edits."""
+        try:
+            content = target.read_text(encoding="utf-8")
+        except OSError:
+            return
+        cleaned = re.sub(
+            r"(?m)^\s*import\s+Submission\.HumanizeSpeculativeChildren\s*\n?",
+            "",
+            content,
+            count=1,
+        )
+        if cleaned != content:
+            target.write_text(cleaned, encoding="utf-8")
+
+    def _install_speculative_assumptions(
+        self,
+        worktree: Path,
+        records: list[NodeRecord],
+    ) -> tuple[Path, Path, list[NodeRecord]]:
+        """Install exact-type temporary child declarations in an isolated worktree."""
+        pending = [one for one in records if not self._accepted_checkpoint(one)]
+        invalid = [
+            one.id
+            for one in pending
+            if not one.lean_name or not one.lean_statement.strip()
+        ]
+        if invalid:
+            raise RuntimeError(
+                "speculative child interfaces are incomplete: " + ", ".join(invalid)
+            )
+        relative_target = getattr(self.config, "lean_target", "")
+        if not relative_target:
+            raise RuntimeError("speculative proving requires an explicit lean_target")
+        target = worktree / relative_target
+        if not target.is_file():
+            raise RuntimeError(f"speculative Lean target is missing: {relative_target}")
+        source = target.read_text(encoding="utf-8")
+        import_lines = [
+            line
+            for line in source.splitlines()
+            if re.match(r"^\s*(?:public\s+)?import\s+", line)
+            and "Submission.HumanizeSpeculativeChildren" not in line
+        ]
+        if not import_lines:
+            raise RuntimeError(
+                f"speculative Lean target has no import prelude: {relative_target}"
+            )
+        stub = worktree / "Submission" / "HumanizeSpeculativeChildren.lean"
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        declarations = "\n\n".join(
+            f"axiom {one.lean_name} : {one.lean_statement.strip()}" for one in pending
+        )
+        stub.write_text(
+            "\n".join(import_lines)
+            + "\n\nnamespace Submission\n\n"
+            + declarations
+            + "\n\nend Submission\n",
+            encoding="utf-8",
+        )
+        lines = source.splitlines(keepends=True)
+        import_indexes = [
+            index
+            for index, line in enumerate(lines)
+            if re.match(r"^\s*(?:public\s+)?import\s+", line)
+        ]
+        insert_at = import_indexes[-1] + 1 if import_indexes else 0
+        lines.insert(insert_at, "import Submission.HumanizeSpeculativeChildren\n")
+        target.write_text("".join(lines), encoding="utf-8")
+        return target, stub, pending
+
+    def _speculate_checkpoint_parent(
+        self,
+        node: NodeRecord,
+        digest: str,
+        records: list[NodeRecord],
+    ) -> SolveResult:
+        """Produce a safe parent draft while exact real child proofs run elsewhere."""
+        plan = self._recorded_plan(node) or self._preserved_plan(node)
+        if plan is None or not node.natural_proof:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback="speculative parent lacks a frozen plan or accepted NL proof",
+            )
+        natural = self.project / node.natural_proof
+        shadow = NodeRecord(
+            id=f"{node.id}.speculative-{digest[:10]}",
+            parent=node.parent,
+            depth=node.depth,
+            title=f"Speculative draft for {node.title}",
+            statement=node.statement,
+            lean_statement=node.lean_statement,
+            lean_name=node.lean_name,
+            attempts=max(node.attempts, 1),
+            worktree=(
+                node.speculative_worktree
+                if node.speculative_contract_digest == digest
+                else ""
+            ),
+            proof_branch=(
+                node.speculative_branch
+                if node.speculative_contract_digest == digest
+                else ""
+            ),
+        )
+        try:
+            worktree = self._node_worktree(shadow)
+        except RuntimeError as error:
+            return SolveResult(ok=False, node_id=node.id, feedback=str(error))
+        if not self._git_clean(worktree):
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=f"speculative worktree is dirty before setup: {worktree}",
+            )
+        overlaid, feedback = self._overlay_accepted_children(node, worktree)
+        if not overlaid:
+            return SolveResult(ok=False, node_id=node.id, feedback=feedback)
+        speculative_base = self._git_head(worktree)
+        self.store.update(
+            node.id,
+            "speculative-lean",
+            (
+                "coding parent now while child proofs run; exact temporary child "
+                "interfaces are isolated from all acceptance gates"
+            ),
+            speculative_worktree=str(worktree),
+            speculative_branch=shadow.proof_branch,
+            speculative_base_commit=speculative_base,
+            speculative_contract_digest=digest,
+        )
+        try:
+            target, stub, pending = self._install_speculative_assumptions(
+                worktree, records
+            )
+        except (OSError, RuntimeError) as error:
+            return SolveResult(ok=False, node_id=node.id, feedback=str(error))
+        child_text = "\n".join(
+            (
+                f"- `{one.id}`: `Submission.{one.lean_name} : "
+                f"{one.lean_statement.strip()}`"
+            )
+            for one in pending
+        )
+        prompt = SPECULATIVE_PARENT_TASK.format(
+            problem_context=self._problem_context(),
+            reference_context=self._reference_context(),
+            node_id=node.id,
+            statement=node.statement,
+            lean_statement=node.lean_statement
+            or "Root declarations are fixed by Challenge.lean.",
+            lean_name=node.lean_name or "official root declarations",
+            natural_path=natural,
+            plan_path=plan,
+            lean_target=self.config.lean_target,
+            children=child_text,
+        )
+        version = max(node.attempts, 1)
+        atomic_text(
+            self._node_dir(node) / f"speculative-prompt-v{version}.md",
+            prompt,
+        )
+        output: Any = ""
+        try:
+            output = self._run_speculative_agent(node, worktree, prompt)
+        finally:
+            self._remove_speculative_import(target)
+            stub.unlink(missing_ok=True)
+        atomic_text(
+            self._node_dir(node) / f"speculative-process-v{version}.log",
+            (str(output) if output is not None else "") + "\n",
+        )
+        if self._git_head(worktree) != speculative_base:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback="speculative worker committed despite the no-commit boundary",
+            )
+        changed = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "--modified",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*.lean",
+            ],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        paths = sorted(one for one in changed.stdout.splitlines() if one)
+        protected = {
+            "Challenge.lean",
+            "ChallengeDeps.lean",
+            "Solution.lean",
+            "WorkspaceTest.lean",
+        }
+        invalid_paths = [
+            one
+            for one in paths
+            if one in protected
+            or not (
+                one == self.config.lean_target
+                or (one.startswith("Submission/") and one.endswith(".lean"))
+            )
+        ]
+        if changed.returncode or invalid_paths:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=(
+                    "speculative worker changed prohibited Lean paths: "
+                    + ", ".join(invalid_paths)
+                ),
+            )
+        if not paths:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback="speculative worker produced no reusable Lean draft",
+            )
+        staged = subprocess.run(
+            ["git", "add", "--", *paths],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if staged.returncode:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback="could not stage safe speculative Lean draft",
+            )
+        diff = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--cached",
+                "--unified=0",
+                "--no-color",
+                "--",
+                *paths,
+            ],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        added = "\n".join(
+            line[1:]
+            for line in diff.stdout.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+        if (
+            "HumanizeSpeculativeChildren" in added
+            or re.search(r"\b(?:sorry|admit|axiom|unsafe)\b", added)
+        ):
+            subprocess.run(
+                ["git", "restore", "--staged", "--", *paths],
+                cwd=worktree,
+                capture_output=True,
+                check=False,
+            )
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback="speculative draft retained a temporary or prohibited declaration",
+            )
+        committed = subprocess.run(
+            [
+                *INTEGRATION_GIT,
+                "commit",
+                "-m",
+                f"wip(speculative): draft {slug(node.id)}",
+            ],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if committed.returncode:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=(committed.stderr or committed.stdout).strip(),
+            )
+        candidate = self._git_head(worktree)
+        self.store.update(
+            node.id,
+            "speculative-ready",
+            (
+                "parent Lean draft preserved without assumptions in its commit; real "
+                "children continue and remain mandatory before comparison"
+            ),
+            speculative_commit=candidate,
+            speculative_contract_digest=digest,
+        )
+        return SolveResult(ok=True, node_id=node.id)
+
+    def _overlay_speculative_parent(
+        self, node: NodeRecord, worktree: Path
+    ) -> tuple[bool, str]:
+        """Overlay only the safe parent draft, never its temporary assumption module."""
+        if not node.speculative_commit or not node.speculative_base_commit:
+            return True, "no speculative parent draft to overlay"
+        digest, _ = self._speculative_contract(node)
+        if digest != node.speculative_contract_digest:
+            return True, "stale speculative draft ignored after child-contract change"
+        listed = subprocess.run(
+            [
+                "git",
+                "rev-list",
+                "--reverse",
+                f"{node.speculative_base_commit}..{node.speculative_commit}",
+            ],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        commits = [one for one in listed.stdout.splitlines() if one]
+        if listed.returncode:
+            return False, "could not enumerate speculative parent draft"
+        commits = [
+            commit
+            for commit in commits
+            if subprocess.run(
+                ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+                cwd=worktree,
+                capture_output=True,
+                check=False,
+            ).returncode
+            != 0
+        ]
+        if not commits:
+            return True, "speculative parent draft already present"
+        if not self._git_clean(worktree):
+            return False, "parent worktree is dirty before speculative-draft overlay"
+        applied, unioned, detail = self._apply_candidate_commits(worktree, commits)
+        if not applied:
+            return False, f"could not overlay speculative parent draft: {detail}"
+        method = "Lean-unioned" if unioned else "cherry-picked"
+        return True, f"{method} speculative parent draft"
+
     def _overlay_accepted_children(
         self, node: NodeRecord, worktree: Path
     ) -> tuple[bool, str]:
@@ -1968,6 +2461,13 @@ class Runtime:
         except RuntimeError as error:
             return SolveResult(ok=False, node_id=node.id, feedback=str(error))
         before = node.proof_base_commit or self._git_head(worktree)
+        overlaid, overlay_feedback = self._overlay_speculative_parent(node, worktree)
+        if not overlaid:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=overlay_feedback,
+            )
         overlaid, overlay_feedback = self._overlay_accepted_children(node, worktree)
         if not overlaid:
             return SolveResult(
@@ -2124,9 +2624,14 @@ class Runtime:
         # leaving the accepted scaffold plan immutable.
         with self._revision_lock:
             parent = self.store.nodes[child.parent]
+            status = (
+                "speculative-lean"
+                if self._speculation_enabled()
+                else "waiting-children"
+            )
             self.store.update(
                 parent.id,
-                "waiting-children",
+                status,
                 f"revise latest natural proof after {child.id} failed: {failure}",
             )
 
