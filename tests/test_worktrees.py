@@ -1869,6 +1869,49 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_speculative_parent_with_accepted_children_is_queued(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "speculative_ready_parent_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=4,
+                    speculative_parent_formalization=True,
+                )
+                runtime = Runtime(None, "speculative ready fixture", config, {})
+                parent = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Root",
+                    statement="Root theorem",
+                )
+                child = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Child",
+                    statement="Child theorem",
+                    lean_statement="True",
+                    lean_name="child_theorem",
+                )
+                parent.children = [child.id]
+                parent.status = "waiting-children"
+                child.status = "integrating"
+                child.candidate_commit = "a" * 40
+
+                future = runtime._submit_speculative_parent(parent)
+
+                self.assertIsNone(future)
+                self.assertEqual(parent.status, "queued")
+                self.assertIn("final parent formalization is ready", parent.message)
+            finally:
+                os.chdir(original)
+
 
 if __name__ == "__main__":
     unittest.main()

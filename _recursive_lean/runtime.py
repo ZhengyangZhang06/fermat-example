@@ -1933,6 +1933,22 @@ class Runtime:
         digest, records = self._speculative_contract(node)
         pending = [one for one in records if not self._accepted_checkpoint(one)]
         if not pending:
+            if node.status not in {
+                "queued",
+                "rlcr-lean",
+                "comparing",
+                "lean-review",
+                "integrating",
+                "proved",
+            }:
+                self.store.update(
+                    node.id,
+                    "queued",
+                    (
+                        "all real child candidates are accepted; final parent "
+                        "formalization is ready"
+                    ),
+                )
             return None
         if (
             node.speculative_commit
