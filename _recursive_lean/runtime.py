@@ -1773,6 +1773,7 @@ class Runtime:
             if result.ok:
                 return result
             feedback = result.feedback or "formalization did not pass its acceptance gates"
+            time.sleep(min(60.0, max(1.0, float(node.lean_attempts))))
 
     def _advance_lean_attempt(self, node: NodeRecord) -> None:
         """Choose a durable Lean-round number without overwriting legacy artifacts."""
@@ -2611,10 +2612,84 @@ class Runtime:
             return True, "worktree already clean"
         if worktree.resolve() == self.project:
             return False, "refusing to stash the canonical project as an interrupted node"
+        version = max(node.lean_attempts, 1)
         label = (
             f"humanize interrupted {slug(node.id)} "
-            f"lean-attempt-{max(node.lean_attempts, 1)}"
+            f"lean-attempt-{version}"
         )
+        unmerged = subprocess.run(
+            ["git", "ls-files", "--unmerged"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if unmerged.returncode == 0 and unmerged.stdout.strip():
+            status = subprocess.run(
+                ["git", "status", "--porcelain=v2"],
+                cwd=worktree,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            cherry = subprocess.run(
+                ["git", "rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"],
+                cwd=worktree,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            merge = subprocess.run(
+                ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                cwd=worktree,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if cherry.returncode == 0:
+                operation = "cherry-pick"
+                command = ["git", "cherry-pick", "--abort"]
+            elif merge.returncode == 0:
+                operation = "merge"
+                command = ["git", "merge", "--abort"]
+            else:
+                operation = "unknown"
+                command = []
+            aborted = (
+                subprocess.run(
+                    command,
+                    cwd=worktree,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if command
+                else None
+            )
+            recovery_log = (
+                f"operation: {operation}\n"
+                f"cherry-pick head: {cherry.stdout.strip()}\n"
+                f"merge heads: {merge.stdout.strip()}\n\n"
+                f"status before abort:\n{status.stdout}\n"
+                f"unmerged index entries:\n{unmerged.stdout}\n"
+                f"abort exit: {aborted.returncode if aborted is not None else 'not-run'}\n"
+                f"abort stdout:\n{aborted.stdout if aborted is not None else ''}\n"
+                f"abort stderr:\n{aborted.stderr if aborted is not None else ''}\n"
+            )
+            atomic_text(
+                self._node_dir(node) / f"interrupted-worktree-v{version}.log",
+                recovery_log,
+            )
+            if (
+                aborted is not None
+                and aborted.returncode == 0
+                and self._git_clean(worktree)
+            ):
+                return (
+                    True,
+                    f"interrupted {operation} aborted after preserving its Git object IDs",
+                )
+            return False, "could not abort interrupted Git conflict state"
         preserved = subprocess.run(
             [
                 *INTEGRATION_GIT,
@@ -2635,8 +2710,7 @@ class Runtime:
             f"\nstderr:\n{preserved.stderr}\n"
         )
         atomic_text(
-            self._node_dir(node)
-            / f"interrupted-worktree-v{max(node.lean_attempts, 1)}.log",
+            self._node_dir(node) / f"interrupted-worktree-v{version}.log",
             log,
         )
         if preserved.returncode or not self._git_clean(worktree):
