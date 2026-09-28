@@ -54,7 +54,13 @@ At the natural-language proof review gate, audit the mathematical argument and e
 lemma, but do not require child Lean declarations or frozen Lean type expressions yet. Those are
 created and independently audited only in the following decomposition gate. Missing mathematical
 hypotheses or circular prose remain rejection reasons; missing post-decomposition Lean artifacts
-at this earlier gate do not.
+at this earlier gate do not. A genuinely deep lemma may be carried as a decomposition obligation
+when its full hypotheses and conclusion are stated, it is strictly narrower than the parent, its
+role and non-circular proof structure are explicit, and any imported mathematical result has an
+exact public citation. Do not require a monograph-length proof inline before the recursive gate can
+create the child whose own prose, Lean comparator, and review must prove that obligation. Reject
+vague names, unverifiable citations, parent-equivalent obligations, and protected benchmark
+material.
 
 For every recursive child, freeze before formalization both a prose statement with all hypotheses
 and a single-line exact Lean proposition/type expression. The expression must not contain a full

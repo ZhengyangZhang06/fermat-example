@@ -83,8 +83,12 @@ offline-reproducible and prevents Lake from trying to update shared read-only Gi
    regeneration.
 5. **Prove the mathematics in natural language.** A Codex worker writes a complete proof and an
    independent Codex reviewer checks the first invalid step. A rejection revises the latest proof,
-   not the scaffold. `natural_proof_attempts` is only the size of one checkpoint batch: reaching it
-   starts another batch from the latest draft and cannot kill the node.
+   not the scaffold. A deep, precisely stated non-circular lemma may be identified as a sourced
+   decomposition obligation rather than expanded into a monograph before recursion starts; its
+   child must still pass the same prose, Lean comparator, and reviewer gates. Vague citations and
+   parent-equivalent obligations are rejected. `natural_proof_attempts` is only the size of one
+   checkpoint batch: reaching it starts another batch from the latest draft and cannot kill the
+   node.
 6. **Decide whether to split.** After the prose proof passes, a decomposition audit checks each
    proposed child theorem, its exact Lean statement and name, and the acyclic dependency list. A
    child repeats the same lifecycle, so recursive workers also produce prose before Lean. Child

@@ -622,6 +622,14 @@ class PreflightTests(unittest.TestCase):
             self.assertIn("{problem_context}", prompt)
             self.assertIn("{reference_context}", prompt)
 
+    def test_natural_proof_gate_supports_strict_recursive_obligations(self) -> None:
+        for prompt in (NATURAL_PROOF, NATURAL_AUDIT):
+            self.assertIn("decomposition obligation", prompt)
+            self.assertIn("strictly narrower", prompt)
+            self.assertIn("protected benchmark", prompt)
+        self.assertIn("parent-equivalent", NATURAL_AUDIT)
+        self.assertIn("exact public", NATURAL_PROOF)
+
 
 if __name__ == "__main__":
     unittest.main()

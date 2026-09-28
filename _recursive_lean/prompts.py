@@ -133,8 +133,20 @@ aggregate DAG name and absence of a child-only frozen type are not defects.
 
 NATURAL_PROOF = """Write the complete natural-language proof for this theorem before any Lean
 formalization. Number every logical step. State every lemma with all hypotheses, explain why it
-is true, and show exactly how the lemmas imply the requested result. Named lemmas may later
-become child DAG nodes, but they are not excuses for a gap: give their mathematical proofs here.
+is true, and show exactly how the lemmas imply the requested result.
+
+This is the proof-architecture gate immediately before recursive decomposition. Prove ordinary
+steps in full. A genuinely deep lemma whose proof would dominate this response may instead be
+declared as a decomposition obligation, but only when you:
+- state its complete mathematical hypotheses and conclusion;
+- show exactly where it is used and why it is strictly narrower than the requested theorem;
+- give a non-circular proof strategy with enough intermediate structure to decompose further; and
+- cite an exact public source (theorem/section/page when available) for any imported mathematical
+  result, or give the substantive argument when no such source is used.
+A vague named lemma, a restatement or immediate equivalent of the parent, an appeal to the result
+being proved, or any protected benchmark solution is still an unresolved gap. A validly specified
+decomposition obligation is not itself an unresolved point: the next gate freezes it as a child,
+and its own prose, Lean implementation, comparator, and independent review must still pass.
 Do not write Lean code and do not edit files.
 
 {problem_context}
@@ -163,11 +175,16 @@ Reject it at the first false, circular, ambiguous, or unjustified step. Check al
 boundary cases, quantifiers, and the final implication to the exact theorem. Do not repair it.
 
 This is the mathematical prose gate before decomposition. Named lemmas must have complete
-mathematical statements and proofs, but their exact frozen Lean types and `Submission.X`
-declarations do not exist yet: the next independent decomposition gate creates and audits those,
-and later child workers formalize them. Do not reject this proof solely because those later Lean
-artifacts are absent. Do reject a missing mathematical hypothesis, proof, or non-circular
-dependency in the prose itself.
+mathematical statements. Ordinary steps require complete proofs. A genuinely deep named lemma may
+be accepted here as a decomposition obligation when it is strictly narrower than the parent, has
+all hypotheses and its exact role stated, and is backed by a non-circular structured proof strategy
+and/or an exact public mathematical citation. Do not require a book-length proof of such an
+obligation inline: the next independent decomposition gate freezes it, and its recursive prose,
+Lean implementation, comparator, and review must still pass. Do reject a vague theorem name,
+missing hypotheses, a parent-equivalent or circular obligation, an unverifiable citation, an appeal
+to protected benchmark material, or a proof whose obligations do not logically imply the result.
+Exact frozen Lean types and `Submission.X` declarations do not exist yet and are not required at
+this gate.
 
 {problem_context}
 
