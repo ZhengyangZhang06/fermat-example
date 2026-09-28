@@ -2924,11 +2924,7 @@ class Runtime:
             )
         reference_problem = self._reference_use_problem(audit)
         if audit is None or not audit.passed or reference_problem:
-            return SolveResult(
-                ok=False,
-                node_id=node.id,
-                feedback=reference_problem or self._lean_feedback(audit),
-            )
+            return self._reject_lean_audit(node, audit, reference_problem)
         self.store.update(
             node.id,
             "integrating",
@@ -4295,6 +4291,29 @@ not blockers for completion of this implementation-only plan.
         return (
             "; ".join([*failed, *audit.issues]) or "Lean reviewer rejected the proof."
         )
+
+    def _reject_lean_audit(
+        self,
+        node: NodeRecord,
+        audit: LeanAudit | None,
+        reference_problem: str = "",
+    ) -> SolveResult:
+        """Make a failed live reviewer gate resumable through managed Lean repair."""
+        feedback = reference_problem or self._lean_feedback(audit)
+        # ``lean-review`` describes a live reviewer gate, not a durable retry
+        # point. If the app-server transport disappears before returning a
+        # schema-valid audit (or the reviewer rejects the candidate), leaving
+        # this status behind strands the node on resume: the scheduler treats
+        # it as work already in flight even though no reviewer owns it. Keep
+        # the accepted prose frozen and route the candidate back through the
+        # managed Lean repair/review path instead.
+        self.store.update(
+            node.id,
+            "rlcr-lean",
+            "fresh Lean reviewer gate failed; retry Lean repair/review with "
+            f"accepted prose frozen: {feedback}",
+        )
+        return SolveResult(ok=False, node_id=node.id, feedback=feedback)
 
     @staticmethod
     def _dependency_problem(subproblems: list[Subproblem]) -> str:

@@ -372,6 +372,45 @@ class WorktreeTests(unittest.TestCase):
             self.assertEqual(integrating.status, "integrating")
             self.assertEqual(integrating.message, "accepted candidate")
 
+    def test_failed_lean_reviewer_gate_returns_node_to_managed_repair(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "review_retry_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                )
+                runtime = Runtime(None, "review retry fixture", config, {})
+                node = runtime.store.ensure(
+                    "root.leaf-a1",
+                    parent="root",
+                    depth=1,
+                    title="Leaf",
+                    statement="True",
+                )
+                runtime.store.update(
+                    node.id,
+                    "lean-review",
+                    "fresh reviewer reruns comparator",
+                )
+
+                result = runtime._reject_lean_audit(node, None)
+
+                self.assertFalse(result.ok)
+                self.assertEqual(result.node_id, node.id)
+                self.assertEqual(
+                    result.feedback,
+                    "The Lean reviewer returned no structured audit.",
+                )
+                self.assertEqual(node.status, "rlcr-lean")
+                self.assertIn("accepted prose frozen", node.message)
+                self.assertIn("no structured audit", node.message)
+            finally:
+                os.chdir(original)
+
     def test_mermaid_arrows_point_from_dependent_to_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
