@@ -2617,6 +2617,43 @@ class Runtime:
             f"humanize interrupted {slug(node.id)} "
             f"lean-attempt-{version}"
         )
+        # A killed Git process can leave a worktree-local index lock behind.  This
+        # method owns the isolated node worktree and runs before a replacement RLCR
+        # process is launched, but retain a recent lock in case the old process is
+        # still winding down.  An old lock would otherwise turn every recovery retry
+        # into an immediate failing `git stash` and create a hot loop.
+        lock_audit = "index lock: absent\n"
+        git_dir_result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if git_dir_result.returncode == 0 and git_dir_result.stdout.strip():
+            git_dir = Path(git_dir_result.stdout.strip())
+            if not git_dir.is_absolute():
+                git_dir = (worktree / git_dir).resolve()
+            index_lock = git_dir / "index.lock"
+            if index_lock.is_file():
+                try:
+                    age = max(0.0, time.time() - index_lock.stat().st_mtime)
+                except OSError as error:
+                    return False, f"could not inspect interrupted Git index lock: {error}"
+                if age < 300.0:
+                    return (
+                        False,
+                        "recent interrupted Git index lock retained for a later retry",
+                    )
+                try:
+                    index_lock.unlink()
+                except OSError as error:
+                    return False, f"could not remove stale interrupted Git index lock: {error}"
+                lock_audit = (
+                    f"index lock: {index_lock}\n"
+                    f"index lock age seconds: {age:.3f}\n"
+                    "stale index lock removed: yes\n"
+                )
         unmerged = subprocess.run(
             ["git", "ls-files", "--unmerged"],
             cwd=worktree,
@@ -2624,37 +2661,44 @@ class Runtime:
             text=True,
             check=False,
         )
-        if unmerged.returncode == 0 and unmerged.stdout.strip():
-            status = subprocess.run(
-                ["git", "status", "--porcelain=v2"],
-                cwd=worktree,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            cherry = subprocess.run(
-                ["git", "rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"],
-                cwd=worktree,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            merge = subprocess.run(
-                ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
-                cwd=worktree,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if cherry.returncode == 0:
-                operation = "cherry-pick"
-                command = ["git", "cherry-pick", "--abort"]
-            elif merge.returncode == 0:
-                operation = "merge"
-                command = ["git", "merge", "--abort"]
-            else:
-                operation = "unknown"
-                command = []
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v2"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        cherry = subprocess.run(
+            ["git", "rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        merge = subprocess.run(
+            ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if cherry.returncode == 0:
+            operation = "cherry-pick"
+            command = ["git", "cherry-pick", "--abort"]
+        elif merge.returncode == 0:
+            operation = "merge"
+            command = ["git", "merge", "--abort"]
+        elif unmerged.returncode == 0 and unmerged.stdout.strip():
+            operation = "unknown"
+            command = []
+        else:
+            operation = ""
+            command = []
+        # Operation marker files survive after a user or interrupted process has
+        # resolved and staged every conflict.  Detect them independently of the
+        # unmerged index, otherwise the staged resolution is incorrectly sent to
+        # `git stash`, which refuses to run during the operation.
+        if operation:
             aborted = (
                 subprocess.run(
                     command,
@@ -2667,7 +2711,7 @@ class Runtime:
                 else None
             )
             recovery_log = (
-                f"operation: {operation}\n"
+                lock_audit + f"operation: {operation}\n"
                 f"cherry-pick head: {cherry.stdout.strip()}\n"
                 f"merge heads: {merge.stdout.strip()}\n\n"
                 f"status before abort:\n{status.stdout}\n"
@@ -2705,7 +2749,8 @@ class Runtime:
             check=False,
         )
         log = (
-            f"command: git stash push --include-untracked --message {label!r}\n"
+            lock_audit
+            + f"command: git stash push --include-untracked --message {label!r}\n"
             f"exit: {preserved.returncode}\n\nstdout:\n{preserved.stdout}\n"
             f"\nstderr:\n{preserved.stderr}\n"
         )

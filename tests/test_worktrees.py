@@ -1656,6 +1656,83 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_resolved_interrupted_cherry_pick_with_stale_lock_is_aborted(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "resolved_cherry_pick_problem"
+            worktree = Path(temporary) / "node-worktree"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / "Submission.lean").write_text("base\n")
+            git(project, "add", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize resolved conflict fixture")
+            git(project, "worktree", "add", "-b", "node-resolved", str(worktree))
+            (worktree / "Submission.lean").write_text("node side\n")
+            git(worktree, "add", "Submission.lean")
+            git(worktree, "commit", "-m", "test: add resolved node side")
+            (project / "Submission.lean").write_text("main side\n")
+            git(project, "add", "Submission.lean")
+            git(project, "commit", "-m", "test: add resolved main side")
+            main_commit = git(project, "rev-parse", "HEAD")
+            conflicted = subprocess.run(
+                ["git", "cherry-pick", main_commit],
+                cwd=worktree,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(conflicted.returncode, 0)
+            (worktree / "Submission.lean").write_text("resolved side\n")
+            git(worktree, "add", "Submission.lean")
+            self.assertEqual(git(worktree, "ls-files", "--unmerged"), "")
+            git_dir = Path(git(worktree, "rev-parse", "--git-dir"))
+            if not git_dir.is_absolute():
+                git_dir = (worktree / git_dir).resolve()
+            index_lock = git_dir / "index.lock"
+            index_lock.touch()
+            old = time.time() - 600
+            os.utime(index_lock, (old, old))
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=2,
+                )
+                runtime = Runtime(None, "resolved conflict fixture", config, {})
+                node = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Child",
+                    statement="A child theorem",
+                )
+                node.lean_attempts = 5
+
+                preserved, feedback = runtime._preserve_interrupted_worktree(
+                    node, worktree
+                )
+
+                self.assertTrue(preserved, feedback)
+                self.assertEqual(git(worktree, "status", "--porcelain"), "")
+                self.assertFalse(index_lock.exists())
+                verification = subprocess.run(
+                    ["git", "rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"],
+                    cwd=worktree,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(verification.returncode, 0)
+                recovery_log = runtime._node_dir(node) / "interrupted-worktree-v5.log"
+                audit = recovery_log.read_text()
+                self.assertIn(main_commit, audit)
+                self.assertIn("operation: cherry-pick", audit)
+                self.assertIn("stale index lock removed: yes", audit)
+            finally:
+                os.chdir(original)
+
     def test_redecomposition_reuses_proved_theorem_instead_of_creating_a2(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
