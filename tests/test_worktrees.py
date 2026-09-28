@@ -111,6 +111,24 @@ class FailedAfterAnswer:
         )
 
 
+class StreamedAnswerSession:
+    def __init__(self, output: str) -> None:
+        self.output = output
+
+    def stream(self, prompt: str, *, schema: Any = None) -> Any:
+        del prompt, schema
+        yield SimpleNamespace(kind="result", text=self.output)
+
+
+class StreamedAnswerAgent:
+    def __init__(self, output: str) -> None:
+        self.output = output
+
+    def new(self, cwd: str | os.PathLike[str] | None = None) -> StreamedAnswerSession:
+        del cwd
+        return StreamedAnswerSession(self.output)
+
+
 class WorktreeTests(unittest.TestCase):
     def test_overlong_slugs_keep_distinct_hash_suffixes(self) -> None:
         shared = "root." + ".very_long_generated_dependency" * 5
@@ -167,6 +185,98 @@ class WorktreeTests(unittest.TestCase):
             NaturalProof,
         )
         self.assertEqual(recovered, expected)
+
+    def test_structured_turn_prefers_last_valid_normal_stream_answer(self) -> None:
+        earlier = NaturalProof(
+            reference_use=reference_use(),
+            proof="A schema-valid subagent answer.",
+            key_steps=["Report to the root agent."],
+            unresolved=["The root agent has not finished."],
+        )
+        expected = NaturalProof(
+            reference_use=reference_use(),
+            proof="The root agent's complete numbered proof.",
+            key_steps=["Conclude the fixture."],
+            unresolved=[],
+        )
+        recovered = _structured_turn(
+            _WorkspaceAgent(
+                StreamedAnswerAgent(
+                    earlier.model_dump_json() + expected.model_dump_json()
+                ),
+                Path.cwd(),
+            ),
+            "prove it",
+            NaturalProof,
+        )
+        self.assertEqual(recovered, expected)
+
+    def test_structured_turn_streams_plain_agent_before_parsing(self) -> None:
+        earlier = NaturalProof(
+            reference_use=reference_use(),
+            proof="A schema-valid subagent answer.",
+            key_steps=["Report to the root agent."],
+            unresolved=["The root agent has not finished."],
+        )
+        expected = NaturalProof(
+            reference_use=reference_use(),
+            proof="The root agent's complete numbered proof.",
+            key_steps=["Conclude the fixture."],
+            unresolved=[],
+        )
+
+        recovered = _structured_turn(
+            StreamedAnswerAgent(
+                earlier.model_dump_json() + expected.model_dump_json()
+            ),
+            "prove it",
+            NaturalProof,
+        )
+
+        self.assertEqual(recovered, expected)
+
+    def test_structured_turn_streams_open_session_before_parsing(self) -> None:
+        earlier = NaturalProof(
+            reference_use=reference_use(),
+            proof="A schema-valid subagent answer.",
+            key_steps=["Report to the root agent."],
+            unresolved=["The root agent has not finished."],
+        )
+        expected = NaturalProof(
+            reference_use=reference_use(),
+            proof="The root agent's complete numbered proof.",
+            key_steps=["Conclude the fixture."],
+            unresolved=[],
+        )
+
+        recovered = _structured_turn(
+            StreamedAnswerSession(
+                earlier.model_dump_json() + expected.model_dump_json()
+            ),
+            "prove it",
+            NaturalProof,
+        )
+
+        self.assertEqual(recovered, expected)
+
+    def test_structured_turn_rejects_partial_normal_stream_tail(self) -> None:
+        earlier = NaturalProof(
+            reference_use=reference_use(),
+            proof="A schema-valid subagent answer.",
+            key_steps=["Report to the root agent."],
+            unresolved=[],
+        )
+        recovered = _structured_turn(
+            _WorkspaceAgent(
+                StreamedAnswerAgent(
+                    earlier.model_dump_json() + '{"reference_use": ['
+                ),
+                Path.cwd(),
+            ),
+            "prove it",
+            NaturalProof,
+        )
+        self.assertIsNone(recovered)
 
     def test_structured_turn_rejects_valid_answer_followed_by_partial_json(
         self,
@@ -1313,6 +1423,58 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_speculative_dependency_gate_never_uses_waiting_lean(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "speculative_dependency_gate_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=2,
+                    speculative_parent_formalization=True,
+                )
+                runtime = Runtime(None, "speculative dependency fixture", config, {})
+                prerequisite = runtime.store.ensure(
+                    "root.prerequisite-a1",
+                    parent="root",
+                    depth=1,
+                    title="Prerequisite",
+                    statement="A prerequisite theorem",
+                    lean_statement="True",
+                    lean_name="prerequisite_theorem",
+                )
+                dependent = runtime.store.ensure(
+                    "root.dependent-a1",
+                    parent="root",
+                    depth=1,
+                    title="Dependent",
+                    statement="A dependent theorem",
+                    lean_statement="True",
+                    lean_name="dependent_theorem",
+                    depends_on=[prerequisite.id],
+                )
+                digest, _ = runtime._speculative_contract(dependent)
+                dependent.speculative_commit = "b" * 40
+                dependent.speculative_contract_digest = digest
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        runtime._wait_for_accepted_dependencies, dependent
+                    )
+                    deadline = time.monotonic() + 30
+                    while dependent.status != "speculative-ready":
+                        self.assertNotEqual(dependent.status, "waiting-lean")
+                        self.assertLess(time.monotonic(), deadline)
+                        time.sleep(0.01)
+                    self.assertFalse(future.done())
+                    prerequisite.status = "integrating"
+                    prerequisite.candidate_commit = "accepted-candidate"
+                    self.assertEqual(future.result(timeout=30), "")
+            finally:
+                os.chdir(original)
+
     def test_redecomposition_reuses_proved_theorem_instead_of_creating_a2(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
@@ -1962,6 +2124,54 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_speculative_mode_launches_dependency_only_node(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "speculative_dependency_node_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=4,
+                    speculative_parent_formalization=True,
+                )
+                runtime = Runtime(None, "speculative dependency fixture", config, {})
+                prerequisite = runtime.store.ensure(
+                    "root.prerequisite-a1",
+                    parent="root",
+                    depth=1,
+                    title="Prerequisite",
+                    statement="Prerequisite theorem",
+                    lean_statement="True",
+                    lean_name="prerequisite_theorem",
+                )
+                dependent = runtime.store.ensure(
+                    "root.dependent-a1",
+                    parent="root",
+                    depth=1,
+                    title="Dependent",
+                    statement="Dependent theorem",
+                    lean_statement="True",
+                    lean_name="dependent_theorem",
+                    depends_on=[prerequisite.id],
+                )
+                launched: Future[SolveResult] = Future()
+
+                with patch.object(
+                    runtime._speculation_executor,
+                    "submit",
+                    return_value=launched,
+                ) as submit:
+                    future = runtime._submit_speculative_parent(dependent)
+
+                self.assertIs(future, launched)
+                submit.assert_called_once()
+                self.assertEqual(dependent.status, "speculative-lean")
+            finally:
+                os.chdir(original)
+
     def test_failed_speculative_parent_future_can_be_relaunched(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
@@ -2109,14 +2319,26 @@ class WorktreeTests(unittest.TestCase):
                 ready_child.status = "proved"
                 pending_parent.status = "waiting-children"
                 pending_child.status = "natural-proof"
+                dependent = runtime.store.ensure(
+                    "root.dependent-a1",
+                    parent="root",
+                    depth=1,
+                    title="Dependent child",
+                    statement="Dependent theorem",
+                    lean_statement="True",
+                    lean_name="dependent_child",
+                    depends_on=[pending_child.id],
+                )
+                dependent.status = "waiting-lean"
 
                 runtime._normalize_speculative_parent_states()
 
                 self.assertEqual(ready_parent.status, "speculative-lean")
                 self.assertEqual(pending_parent.status, "speculative-lean")
+                self.assertEqual(dependent.status, "speculative-lean")
                 self.assertFalse(
                     any(
-                        node.status == "waiting-children"
+                        node.status in {"waiting-children", "waiting-lean"}
                         for node in runtime.store.nodes.values()
                     )
                 )

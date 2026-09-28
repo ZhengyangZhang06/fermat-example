@@ -215,6 +215,24 @@ class PreflightTests(unittest.TestCase):
             depends_on=[],
         )
         self.assertEqual(made_with_lets.lean_statement, let_statement)
+        let_instance_statement = (
+            "∃ c : Nat, letI : OfNat Nat 1 := inferInstance; c = 1"
+        )
+        made_with_let_instance = Subproblem(
+            key="let_instance_contract",
+            title="Let-instance contract",
+            statement=(
+                "A generated theorem type may install an instance with a term-level "
+                "letI binder."
+            ),
+            lean_statement=let_instance_statement,
+            lean_name="let_instance_contract",
+            depends_on=[],
+        )
+        self.assertEqual(
+            made_with_let_instance.lean_statement,
+            let_instance_statement,
+        )
         with self.assertRaisesRegex(ValueError, "type expression"):
             Subproblem(
                 key="invalid_proof",

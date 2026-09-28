@@ -75,6 +75,62 @@ INTEGRATION_GIT = (
 )
 
 
+def _validated_structured_answer(raw: Any, schema: Any) -> Any:
+    """Return the last complete schema-valid JSON document in one raw answer."""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    if not isinstance(raw, str):
+        return None
+    held = raw.strip()
+    try:
+        return schema.model_validate_json(held)
+    except (TypeError, ValueError):
+        pass
+
+    # A root turn may print a schema-constrained subagent result before its own
+    # answer.  In that case stdout can contain adjacent JSON documents, and
+    # slicing from the first ``{`` to the last ``}`` produces invalid JSON.
+    # Decode complete top-level document chains and prefer the last schema-valid
+    # document.  If a chain ends in a partial JSON document, discard the whole
+    # chain rather than accidentally accepting an older subagent answer as the
+    # root answer.
+    decoder = json.JSONDecoder()
+    recovered: list[tuple[int, Any]] = []
+    for match in re.finditer(r"(?m)^\{", held):
+        position = match.start()
+        chain: list[tuple[int, Any]] = []
+        incomplete = False
+        while True:
+            try:
+                value, end = decoder.raw_decode(held, position)
+            except json.JSONDecodeError:
+                incomplete = True
+                break
+            try:
+                parsed = schema.model_validate(value)
+            except (TypeError, ValueError):
+                parsed = None
+            if parsed is not None:
+                chain.append((end, parsed))
+            position = end
+            while position < len(held) and held[position].isspace():
+                position += 1
+            if position >= len(held) or held[position] != "{":
+                break
+        if not incomplete:
+            recovered.extend(chain)
+    if recovered:
+        return max(recovered, key=lambda item: item[0])[1]
+
+    first, last = held.find("{"), held.rfind("}")
+    if 0 <= first < last and "{" not in held[last + 1 :]:
+        try:
+            return schema.model_validate_json(held[first : last + 1])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def _structured_turn(session: Any, prompt: str, schema: Any) -> Any:
     """Return a schema-valid answer, including one completed before transport failed.
 
@@ -85,7 +141,27 @@ def _structured_turn(session: Any, prompt: str, schema: Any) -> Any:
     against the requested model.  A partial status message or malformed response still
     behaves exactly like ``suppress=True`` and returns ``None``.
     """
+    raw: Any = None
     try:
+        # ``SessionBase.__call__`` parses the final text before returning it and
+        # raises ``ValueError`` without preserving that text when two complete
+        # JSON documents are adjacent.  Calls arrive in all three forms used by
+        # this runtime: a plain AgentBase, an already-open SessionBase, or the
+        # worktree-bound adapter below.  Consume every stream-capable form
+        # directly so the defensive decoder retains the raw final result.
+        opened = None
+        stream = getattr(session, "stream", None)
+        if callable(stream):
+            opened = session
+        else:
+            new = getattr(session, "new", None)
+            if callable(new):
+                opened = new()
+        if opened is not None:
+            for event in opened.stream(prompt, schema=schema):
+                if event.kind == "result":
+                    raw = event.text
+            return _validated_structured_answer(raw, schema)
         return session(prompt, suppress=False, schema=schema)
     except subprocess.CalledProcessError as error:
         diagnostic = str(error.stderr or "")
@@ -99,58 +175,9 @@ def _structured_turn(session: Any, prompt: str, schema: Any) -> Any:
         )
         if not transport_lost:
             return None
-        raw = error.stdout if error.stdout is not None else error.output
-        if isinstance(raw, bytes):
-            raw = raw.decode("utf-8", errors="replace")
-        if isinstance(raw, str):
-            held = raw.strip()
-            try:
-                return schema.model_validate_json(held)
-            except (TypeError, ValueError):
-                pass
-
-            # A root turn may print a schema-constrained subagent result before its
-            # own answer.  In that case stdout can contain adjacent JSON documents,
-            # and slicing from the first ``{`` to the last ``}`` produces invalid
-            # JSON.  Decode complete top-level document chains and prefer the last
-            # schema-valid document.  If a chain ends in a partial JSON document,
-            # discard the whole chain rather than accidentally accepting an older
-            # subagent answer as the root answer.
-            decoder = json.JSONDecoder()
-            recovered: list[tuple[int, Any]] = []
-            for match in re.finditer(r"(?m)^\{", held):
-                position = match.start()
-                chain: list[tuple[int, Any]] = []
-                incomplete = False
-                while True:
-                    try:
-                        value, end = decoder.raw_decode(held, position)
-                    except json.JSONDecodeError:
-                        incomplete = True
-                        break
-                    try:
-                        parsed = schema.model_validate(value)
-                    except (TypeError, ValueError):
-                        parsed = None
-                    if parsed is not None:
-                        chain.append((end, parsed))
-                    position = end
-                    while position < len(held) and held[position].isspace():
-                        position += 1
-                    if position >= len(held) or held[position] != "{":
-                        break
-                if not incomplete:
-                    recovered.extend(chain)
-            if recovered:
-                return max(recovered, key=lambda item: item[0])[1]
-
-            first, last = held.find("{"), held.rfind("}")
-            if 0 <= first < last and "{" not in held[last + 1 :]:
-                try:
-                    return schema.model_validate_json(held[first : last + 1])
-                except (TypeError, ValueError):
-                    pass
-        return None
+        if raw is None:
+            raw = error.stdout if error.stdout is not None else error.output
+        return _validated_structured_answer(raw, schema)
     except ValueError:
         return None
 
@@ -1446,7 +1473,13 @@ class Runtime:
         return [results[one.key] for one in decomposition.subproblems]
 
     def _wait_for_accepted_dependencies(self, node: NodeRecord) -> str:
-        """Pause only the Lean phase until every sibling prerequisite is accepted."""
+        """Keep a dependency-consuming node speculative until real proofs arrive.
+
+        Without speculative formalization this retains the original ``waiting-lean``
+        gate.  With speculation enabled, the node has already been coded against the
+        exact frozen prerequisite interfaces, so expose that useful state instead of
+        claiming that Lean work has not started.
+        """
         if not node.depends_on:
             return ""
         announced: tuple[str, ...] = ()
@@ -1482,14 +1515,33 @@ class Runtime:
                 return ""
             current = tuple(record.id for record in waiting)
             if current != announced:
-                self.store.update(
-                    node.id,
-                    "waiting-lean",
-                    (
-                        "natural proof/decomposition ready; Lean waits for accepted "
-                        "prerequisite(s): " + ", ".join(current)
-                    ),
-                )
+                if self._speculation_enabled():
+                    digest, _ = self._speculative_contract(node)
+                    draft_ready = bool(
+                        node.speculative_commit
+                        and node.speculative_contract_digest == digest
+                    )
+                    self.store.update(
+                        node.id,
+                        "speculative-ready" if draft_ready else "speculative-lean",
+                        (
+                            "Lean draft already exists under exact frozen prerequisite "
+                            "interfaces; real prerequisite gates continue in parallel: "
+                            if draft_ready
+                            else "Lean coding has started under exact frozen prerequisite "
+                            "interfaces while real gates continue in parallel: "
+                        )
+                        + ", ".join(current),
+                    )
+                else:
+                    self.store.update(
+                        node.id,
+                        "waiting-lean",
+                        (
+                            "natural proof/decomposition ready; Lean waits for accepted "
+                            "prerequisite(s): " + ", ".join(current)
+                        ),
+                    )
                 announced = current
             time.sleep(0.5)
 
@@ -1607,7 +1659,7 @@ class Runtime:
             if self._speculation_enabled():
                 for node_id in sorted(managed):
                     node = self.store.nodes[node_id]
-                    if node.children:
+                    if node.children or node.depends_on:
                         self._submit_speculative_parent(node)
             while self.store.nodes[root.id].status != "proved":
                 for node in ready_nodes():
@@ -1932,7 +1984,9 @@ class Runtime:
     def _normalize_speculative_parent_states(self) -> None:
         """Remove legacy waiting labels before any resumed workers are submitted."""
         for node in list(self.store.nodes.values()):
-            if node.status != "waiting-children" or not node.children:
+            if node.status not in {"waiting-children", "waiting-lean"}:
+                continue
+            if not node.children and not node.depends_on:
                 continue
             digest, records = self._speculative_contract(node)
             pending = [one for one in records if not self._accepted_checkpoint(one)]
@@ -1981,10 +2035,10 @@ class Runtime:
         return hashlib.sha256(material.encode()).hexdigest(), records
 
     def _submit_speculative_parent(self, node: NodeRecord) -> Any | None:
-        """Start one non-accepting parent proof concurrently with real child workers."""
+        """Start one non-accepting proof against pending child/prerequisite interfaces."""
         if (
             not self._speculation_enabled()
-            or not node.children
+            or not (node.children or node.depends_on)
             or self._accepted_checkpoint(node)
         ):
             return None

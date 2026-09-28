@@ -18,8 +18,9 @@ def validate_lean_statement(value: str) -> str:
 
     A generated child contract is embedded inside parentheses by the comparator.  Named
     arguments may contain ``:=`` at positive delimiter depth, and an ordinary type expression
-    may contain top-level ``let x := value; body`` binders.  A top-level assignment without a
-    pending ``let`` is instead declaration/proof syntax and is rejected.
+    may contain top-level ``let x := value; body`` or ``letI : T := value; body`` binders.  A
+    top-level assignment without a pending term-level binder is instead declaration/proof
+    syntax and is rejected.
     """
     normalized = value.strip()
     if not normalized:
@@ -69,14 +70,23 @@ def validate_lean_statement(value: str) -> str:
             index += 1
             continue
         if not stack:
-            if normalized.startswith("let", index):
+            keyword = next(
+                (
+                    candidate
+                    for candidate in ("letI", "let")
+                    if normalized.startswith(candidate, index)
+                ),
+                "",
+            )
+            if keyword:
                 before = normalized[index - 1] if index else ""
-                after = normalized[index + 3] if index + 3 < len(normalized) else ""
+                end = index + len(keyword)
+                after = normalized[end] if end < len(normalized) else ""
                 if (not before or not _IDENTIFIER.fullmatch(before)) and (
                     not after or not _IDENTIFIER.fullmatch(after)
                 ):
                     top_level_let_pending = True
-                    index += 3
+                    index = end
                     continue
             if normalized.startswith(":=", index):
                 if not top_level_let_pending:
