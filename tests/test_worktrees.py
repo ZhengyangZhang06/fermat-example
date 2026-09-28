@@ -1475,6 +1475,123 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_formalization_failure_retries_lean_without_reopening_prose(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "frozen_natural_proof_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=2,
+                )
+                runtime = Runtime(None, "frozen natural proof fixture", config, {})
+                node = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Child",
+                    statement="A child theorem",
+                    lean_statement="True",
+                    lean_name="child_theorem",
+                )
+                plan = project / "plan.md"
+                plan.write_text("# Accepted plan\n")
+                natural = NaturalProof(
+                    reference_use=reference_use(),
+                    proof="The accepted mathematical proof.",
+                    key_steps=["Conclude the theorem."],
+                    unresolved=[],
+                )
+                outcomes = [
+                    SolveResult(
+                        ok=False,
+                        node_id=node.id,
+                        feedback="the first Lean candidate did not compile",
+                    ),
+                    SolveResult(ok=True, node_id=node.id),
+                ]
+
+                with patch.object(
+                    runtime, "_formalize", side_effect=outcomes
+                ) as formalize, patch.object(
+                    runtime, "_accepted_natural_proof"
+                ) as reopen_prose:
+                    result = runtime._formalize_until_accepted(
+                        node, plan, natural, []
+                    )
+
+                self.assertTrue(result.ok)
+                self.assertEqual(formalize.call_count, 2)
+                reopen_prose.assert_not_called()
+                self.assertEqual(node.lean_attempts, 2)
+                self.assertEqual(node.status, "rlcr-lean")
+                self.assertIn("accepted natural proof remains frozen", node.message)
+            finally:
+                os.chdir(original)
+
+    def test_interrupted_worktree_edits_are_stashed_before_overlay(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "interrupted_worktree_problem"
+            worktree = Path(temporary) / "node-worktree"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / "Submission.lean").write_text("import Mathlib\n")
+            git(project, "add", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize recovery fixture")
+            git(project, "worktree", "add", "-b", "node-recovery", str(worktree))
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=2,
+                )
+                runtime = Runtime(None, "interrupted worktree fixture", config, {})
+                node = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Child",
+                    statement="A child theorem",
+                )
+                node.lean_attempts = 3
+                (worktree / "Submission.lean").write_text(
+                    "import Mathlib\n\n-- interrupted edit\n"
+                )
+                (worktree / "Submission" / "Partial.lean").parent.mkdir()
+                (worktree / "Submission" / "Partial.lean").write_text(
+                    "import Mathlib\n"
+                )
+
+                preserved, feedback = runtime._preserve_interrupted_worktree(
+                    node, worktree
+                )
+
+                self.assertTrue(preserved, feedback)
+                self.assertEqual(git(worktree, "status", "--porcelain"), "")
+                self.assertIn(
+                    "humanize interrupted root-child-a1 lean-attempt-3",
+                    git(worktree, "stash", "list", "--format=%s"),
+                )
+                stashed = git(
+                    worktree,
+                    "stash",
+                    "show",
+                    "--include-untracked",
+                    "--name-only",
+                    "stash@{0}",
+                )
+                self.assertIn("Submission.lean", stashed)
+                self.assertIn("Submission/Partial.lean", stashed)
+            finally:
+                os.chdir(original)
+
     def test_redecomposition_reuses_proved_theorem_instead_of_creating_a2(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:

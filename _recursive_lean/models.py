@@ -398,6 +398,7 @@ class NodeRecord(BaseModel):
     status: NodeStatus = "queued"
     message: str = ""
     attempts: int = 0
+    lean_attempts: int = 0
     plan: str = ""
     natural_proof: str = ""
     lean_files: list[str] = Field(default_factory=list)

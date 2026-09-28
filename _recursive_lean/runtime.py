@@ -948,12 +948,7 @@ class Runtime:
                     node_id=node.id,
                     feedback=dependency_problem,
                 )
-            result = self._formalize(node, plan, natural, children)
-            if result.ok:
-                return result
-            feedback = result.feedback
-            if node.parent:
-                self._revise_parent(node, feedback)
+            return self._formalize_until_accepted(node, plan, natural, children)
         self.store.update(node.id, "failed", feedback)
         return SolveResult(ok=False, node_id=node.id, feedback=feedback)
 
@@ -1749,13 +1744,47 @@ class Runtime:
             )
             for child in (self.store.nodes[child_id] for child_id in node.children)
         ]
+        return self._formalize_until_accepted(node, plan, natural, children)
+
+    def _formalize_until_accepted(
+        self,
+        node: NodeRecord,
+        plan: Path,
+        natural: NaturalProof,
+        children: list[SolveResult],
+    ) -> SolveResult:
+        """Keep an accepted mathematical proof frozen while Lean repair iterates."""
+        feedback = ""
         while True:
+            self._advance_lean_attempt(node)
+            if feedback:
+                self.store.update(
+                    node.id,
+                    "rlcr-lean",
+                    (
+                        f"Lean repair attempt {node.lean_attempts}; accepted natural "
+                        f"proof remains frozen after: {feedback}"
+                    ),
+                    lean_attempts=node.lean_attempts,
+                )
+            else:
+                self.store.render()
             result = self._formalize(node, plan, natural, children)
             if result.ok:
                 return result
-            natural = self._accepted_natural_proof(node, plan, result.feedback)
-            if natural is None:
-                return result
+            feedback = result.feedback or "formalization did not pass its acceptance gates"
+
+    def _advance_lean_attempt(self, node: NodeRecord) -> None:
+        """Choose a durable Lean-round number without overwriting legacy artifacts."""
+        versions = [node.lean_attempts]
+        for artifact in self._node_dir(node).iterdir():
+            match = re.match(
+                r"(?:rlcr-(?:config|plan|process)|comparator)-v(\d+)",
+                artifact.name,
+            )
+            if match:
+                versions.append(int(match.group(1)))
+        node.lean_attempts = max(versions) + 1
 
     def _checkpoint_theorems(self, node: NodeRecord) -> list[ProvedTheorem]:
         """Rehydrate enough accepted child metadata for resumed parent formalization."""
@@ -2574,6 +2603,46 @@ class Runtime:
         method = "Lean-unioned" if unioned else "cherry-picked"
         return True, f"{method} {len(commits)} accepted child commit(s)"
 
+    def _preserve_interrupted_worktree(
+        self, node: NodeRecord, worktree: Path
+    ) -> tuple[bool, str]:
+        """Recoverably stash interrupted RLCR edits before deterministic overlays."""
+        if self._git_clean(worktree):
+            return True, "worktree already clean"
+        if worktree.resolve() == self.project:
+            return False, "refusing to stash the canonical project as an interrupted node"
+        label = (
+            f"humanize interrupted {slug(node.id)} "
+            f"lean-attempt-{max(node.lean_attempts, 1)}"
+        )
+        preserved = subprocess.run(
+            [
+                *INTEGRATION_GIT,
+                "stash",
+                "push",
+                "--include-untracked",
+                "--message",
+                label,
+            ],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        log = (
+            f"command: git stash push --include-untracked --message {label!r}\n"
+            f"exit: {preserved.returncode}\n\nstdout:\n{preserved.stdout}\n"
+            f"\nstderr:\n{preserved.stderr}\n"
+        )
+        atomic_text(
+            self._node_dir(node)
+            / f"interrupted-worktree-v{max(node.lean_attempts, 1)}.log",
+            log,
+        )
+        if preserved.returncode or not self._git_clean(worktree):
+            return False, "could not preserve interrupted participant edits in Git stash"
+        return True, "interrupted participant edits preserved in recoverable Git stash"
+
     def _formalize(
         self,
         node: NodeRecord,
@@ -2604,6 +2673,15 @@ class Runtime:
             worktree = self._node_worktree(node)
         except RuntimeError as error:
             return SolveResult(ok=False, node_id=node.id, feedback=str(error))
+        preserved, preserve_feedback = self._preserve_interrupted_worktree(
+            node, worktree
+        )
+        if not preserved:
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=preserve_feedback,
+            )
         before = node.proof_base_commit or self._git_head(worktree)
         overlaid, overlay_feedback = self._overlay_speculative_parent(node, worktree)
         if not overlaid:
@@ -2689,8 +2767,8 @@ class Runtime:
         if not passed:
             self.store.update(
                 node.id,
-                "natural-proof",
-                "comparator rejected the theorem; revise latest NL proof",
+                "rlcr-lean",
+                "comparator rejected the theorem; continue Lean repair with accepted prose frozen",
             )
             return SolveResult(
                 ok=False,
@@ -2829,7 +2907,10 @@ class Runtime:
             log = f"command: {rendered}\ncomparator execution failed: {error}\n"
             passed = False
         suffix = f"-{slug(label)}" if label else ""
-        path = self._node_dir(node) / f"comparator-v{node.attempts}{suffix}.log"
+        path = (
+            self._node_dir(node)
+            / f"comparator-v{max(node.lean_attempts, 1)}{suffix}.log"
+        )
         atomic_text(path, log)
         return passed, path, log
 
@@ -2887,7 +2968,8 @@ class Runtime:
         required in addition to binding the Codex sessions to the worktree.
         """
         node_dir = self._node_dir(node)
-        config_path = node_dir / f"rlcr-config-v{node.attempts}.json"
+        version = max(node.lean_attempts, 1)
+        config_path = node_dir / f"rlcr-config-v{version}.json"
         atomic_text(
             config_path,
             json.dumps(
@@ -2923,7 +3005,7 @@ class Runtime:
             self._agent_spec(self.agents.reviewer),
             task,
         ]
-        log_path = node_dir / f"rlcr-process-v{node.attempts}.log"
+        log_path = node_dir / f"rlcr-process-v{version}.log"
         environment = os.environ.copy()
         environment.pop(
             getattr(self.config, "huggingface_token_env", "HF_TOKEN"),
@@ -3844,7 +3926,7 @@ class Runtime:
         children: str,
     ) -> Path:
         """Give nested RLCR only the work it can finish before returning control."""
-        path = self._node_dir(node) / f"rlcr-plan-v{node.attempts}.md"
+        path = self._node_dir(node) / f"rlcr-plan-v{max(node.lean_attempts, 1)}.md"
         content = f"""# Implement Lean DAG node `{node.id}`
 
 ## Frozen problem acquisition
