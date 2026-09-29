@@ -10,7 +10,14 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from _recursive_lean.models import FetchedProblem, NaturalProof, SolveResult, Subproblem
+from _recursive_lean.models import (
+    DecompositionAudit,
+    FetchedProblem,
+    NaturalProof,
+    SolveResult,
+    Subproblem,
+    SubproblemAudit,
+)
 from _recursive_lean.preflight import (
     REFERENCE_SOURCES,
     ReferenceBundle,
@@ -198,6 +205,8 @@ class PreflightTests(unittest.TestCase):
             lean_statement=statement,
             lean_name="selmer_identity",
             depends_on=[],
+            natural_proof="1. Reflexivity proves the stated Selmer-group identity.",
+            proof_key_steps=["Apply reflexivity."],
         )
         self.assertEqual(made.lean_statement, statement)
         let_statement = (
@@ -213,6 +222,8 @@ class PreflightTests(unittest.TestCase):
             lean_statement=let_statement,
             lean_name="let_contract",
             depends_on=[],
+            natural_proof="1. Use the stated nonemptiness hypothesis after unfolding the lets.",
+            proof_key_steps=["Unfold the let-bound objects."],
         )
         self.assertEqual(made_with_lets.lean_statement, let_statement)
         let_instance_statement = (
@@ -228,6 +239,8 @@ class PreflightTests(unittest.TestCase):
             lean_statement=let_instance_statement,
             lean_name="let_instance_contract",
             depends_on=[],
+            natural_proof="1. Choose one and use the installed natural-number instance.",
+            proof_key_steps=["Choose the witness one."],
         )
         self.assertEqual(
             made_with_let_instance.lean_statement,
@@ -241,6 +254,8 @@ class PreflightTests(unittest.TestCase):
                 lean_statement="True := by trivial",
                 lean_name="invalid_proof",
                 depends_on=[],
+                natural_proof="1. The proposition True follows from its constructor.",
+                proof_key_steps=["Apply the constructor of True."],
             )
         with self.assertRaisesRegex(ValueError, "Matrix.of"):
             Subproblem(
@@ -253,6 +268,8 @@ class PreflightTests(unittest.TestCase):
                 ),
                 lean_name="wrong_matrix_instance",
                 depends_on=[],
+                natural_proof="1. The fixture supplies the claimed matrix-unit property.",
+                proof_key_steps=["Use the fixture hypothesis."],
             )
         corrected_matrix_statement = (
             "∀ u : Fin 3 → Fin 3 → ℤ, "
@@ -265,6 +282,8 @@ class PreflightTests(unittest.TestCase):
             lean_statement=corrected_matrix_statement,
             lean_name="matrix_instance",
             depends_on=[],
+            natural_proof="1. The fixture supplies the claimed matrix-unit property.",
+            proof_key_steps=["Use the fixture hypothesis."],
         )
         self.assertEqual(corrected_matrix.lean_statement, corrected_matrix_statement)
         for unsafe in (
@@ -280,7 +299,46 @@ class PreflightTests(unittest.TestCase):
                     lean_statement=unsafe,
                     lean_name="unsafe_contract",
                     depends_on=[],
+                    natural_proof="1. The proposition True follows from its constructor.",
+                    proof_key_steps=["Apply the constructor of True."],
                 )
+
+    def test_subproblem_requires_a_complete_parent_supplied_proof(self) -> None:
+        with self.assertRaisesRegex(ValueError, "natural_proof"):
+            Subproblem(
+                key="missing_proof",
+                title="Missing proof",
+                statement="A child contract without a supplied proof is invalid.",
+                lean_statement="True",
+                lean_name="missing_proof",
+                depends_on=[],
+            )
+        with self.assertRaisesRegex(ValueError, "not substantive"):
+            Subproblem(
+                key="blank_proof",
+                title="Blank proof",
+                statement="A child contract with whitespace is also invalid.",
+                lean_statement="True",
+                lean_name="blank_proof",
+                depends_on=[],
+                natural_proof=" " * 30,
+                proof_key_steps=["Apply the constructor of True."],
+            )
+
+        rejected = DecompositionAudit(
+            reference_use=reference_use(),
+            acceptable=True,
+            nodes=[
+                SubproblemAudit(
+                    key="child",
+                    acceptable=True,
+                    natural_proof_acceptable=False,
+                    reason="The statement is sound but the supplied proof has a gap.",
+                )
+            ],
+            required_changes=[],
+        )
+        self.assertFalse(rejected.passed)
 
     def test_problem_id_is_resolved_before_the_agent_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -629,6 +687,13 @@ class PreflightTests(unittest.TestCase):
             self.assertIn("protected benchmark", prompt)
         self.assertIn("parent-equivalent", NATURAL_AUDIT)
         self.assertIn("exact public", NATURAL_PROOF)
+
+    def test_decomposition_supplies_and_reviews_each_child_proof(self) -> None:
+        self.assertIn("child receives it verbatim", DECOMPOSE)
+        self.assertIn("skips both plan generation", DECOMPOSE)
+        self.assertIn("`natural_proof`", DECOMPOSE)
+        self.assertIn("natural_proof_acceptable=true", DECOMPOSITION_AUDIT)
+        self.assertIn("without a new child planning", DECOMPOSITION_AUDIT)
 
 
 if __name__ == "__main__":

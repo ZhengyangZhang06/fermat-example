@@ -39,9 +39,11 @@ Before writing new or revised Lean:
 3. Identify the first unsupported step rather than papering over it.
 4. Split only at genuine mathematical obligations; never create circular child statements.
 
-A plan is not itself the complete proof. Generate it once in direct mode as a concrete scaffold,
-then freeze it without a separate plan-review or plan-revision stage. The next flow gate writes
-and independently reviews the full numbered proof. Lean files that already existed when the flow
+A plan is not itself the complete proof. Generate it once for the root in direct mode as a concrete
+scaffold, then freeze it without a separate plan-review or plan-revision stage. The next root flow
+gate writes and independently reviews the full numbered proof. A recursive child must not invoke
+planning or a natural-language author/reviewer loop: it consumes the proof bundle supplied and
+independently reviewed at its parent's decomposition gate. Lean files that already existed when the flow
 started are inherited proof-base material, not automatic evidence that the current node is proved.
 Definitions and kernel-checked helper lemmas present at the node's frozen proof-base commit may be
 reused as ordinary library infrastructure when the configured comparator and source-safety checks
@@ -58,13 +60,19 @@ at this earlier gate do not. A genuinely deep lemma may be carried as a decompos
 when its full hypotheses and conclusion are stated, it is strictly narrower than the parent, its
 role and non-circular proof structure are explicit, and any imported mathematical result has an
 exact public citation. Do not require a monograph-length proof inline before the recursive gate can
-create the child whose own prose, Lean comparator, and review must prove that obligation. Reject
-vague names, unverifiable citations, parent-equivalent obligations, and protected benchmark
-material.
+create the child; however, that parent's decomposition response must then supply the complete child
+proof and the independent decomposition reviewer must approve it before activation. The child does
+not write replacement prose. Reject vague names, unverifiable citations, parent-equivalent
+obligations, and protected benchmark material.
 
-For every recursive child, freeze before formalization both a prose statement with all hypotheses
-and a single-line exact Lean proposition/type expression. The expression must not contain a full
-declaration or `:=` proof. Independently review that prose/type pair and its acyclic dependencies.
+For every recursive child, freeze before activation a prose statement with all hypotheses, a
+single-line exact Lean proposition/type expression, a complete numbered natural-language proof,
+and ordered proof key steps. The expression must not contain a full declaration or `:=` proof.
+Independently review the prose/type pair, the full proof, and its acyclic dependencies. Reject a
+proof with any unsupported step, circular appeal, placeholder, or instruction for the child to
+discover the argument later. Persist the accepted material in a controller-written child handoff;
+the child must fail closed if that handoff is missing or altered, never fall back to generating a
+plan or proof itself.
 Use a bare child identifier `X` in decomposition metadata; the implementation and comparator refer
 to it as `Submission.X`. Do not encode the namespace as `Submission_X` or `SubmissionX`.
 The child comparator must compile the candidate against this frozen type; comparing two aliases
@@ -93,9 +101,12 @@ For Lean:
 - Run the exact configured comparator. A successful build alone is insufficient.
 - A reviewer must rerun the comparator independently before accepting a theorem.
 
-Generate one scaffold plan per node and never iterate it. When a natural-proof reviewer,
-decomposition reviewer, isolated comparator, or Lean reviewer rejects the theorem, preserve the
-latest prose draft and revise only that natural-language proof before trying another Lean proof.
+Generate one scaffold plan for the root and never iterate it. Generate a deterministic
+implementation contract—not a model planning pass—for each reviewed child handoff. When the root
+natural-proof reviewer rejects the theorem, preserve and revise the latest root proof. When a
+decomposition reviewer rejects a proposed child proof, the parent decomposition must repair it
+before activation. Once activated, keep the inherited child proof frozen while isolated Lean and
+Lean-review repair iterates; never open child planning or prose generation.
 Once the isolated comparator and the independent reviewer comparator both pass, freeze those
 approvals: a later integration failure must remain in an integration-only repair loop and must
 never restart the NL proof or revise the parent. This invariant applies at every recursion depth.
@@ -135,6 +146,7 @@ Mermaid graph every edge is solid and every arrow `A --> B` means A depends on B
 therefore point to their decomposition children, and nodes point to their explicit prerequisites;
 a decomposition leaf may still be dependency-blocked.
 
-Persist every natural-language draft and its exact review feedback. If proof review fails or the
-run resumes, revise the latest preserved draft—retaining its sound steps—instead of starting the
-proof again from an empty response.
+Persist every root natural-language draft and its exact review feedback, plus every accepted
+parent-to-child proof handoff. If root proof review fails or the run resumes, revise the latest
+preserved root draft—retaining its sound steps—instead of starting from an empty response. Never
+revise an activated child's proof locally; a missing or altered handoff is a hard failure.

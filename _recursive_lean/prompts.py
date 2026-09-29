@@ -201,7 +201,16 @@ DECOMPOSE = """After reading the complete natural-language proof below, decide w
 should be factored into separately named Lean theorems. This decision is made at every depth,
 so a subproblem may itself activate more workers. Split only on genuine reusable mathematical
 obligations. When splitting, return 2 to {max_children} self-contained statements, unique
-snake_case keys, proposed bare Lean identifiers, and sibling dependencies. A child's
+snake_case keys, proposed bare Lean identifiers, sibling dependencies, and a complete
+natural-language proof for every child. The proof belongs to the parent-to-child contract: the
+child receives it verbatim and skips both plan generation and natural-language author/reviewer
+generation. Therefore each child's `natural_proof` must number the argument, prove that child's
+exact self-contained statement from its hypotheses, and contain no unresolved step, circular
+appeal, placeholder, or instruction to discover a proof later. Also return `proof_key_steps`, the
+ordered logical spine of that proof. Extract and specialize the relevant argument from the parent
+proof, filling in details needed to make the child proof independently usable.
+
+A child's
 `lean_name` must be only `X`, never `Submission.X`, `Submission_X`, or `SubmissionX`; the
 implementation and comparator will refer to that declaration as `Submission.X`. For each child, also give
 `lean_statement`: the exact, single-line Lean proposition/type expression for that theorem,
@@ -238,6 +247,12 @@ natural-language proof has passed review. You did not create the split.
 Check that the split decision is appropriate, every child is a genuine non-circular obligation,
 the prose statement includes all hypotheses, dependencies are acyclic and correctly directed,
 and every `lean_statement` is an exact one-line Lean proposition matching its prose statement.
+Read each child's `natural_proof` independently, step by step. Set
+`natural_proof_acceptable=true` only when it proves that child's exact statement, uses every
+hypothesis correctly, contains no hidden gap or circular reliance on the child/parent theorem, and
+is detailed enough to guide formalization without a new child planning or prose-generation pass.
+The parent is solely responsible for supplying this proof; reject a decomposition that merely
+describes how the child might later search for or construct one.
 Check that every `lean_name` is a bare identifier `X` intended to be declared as `Submission.X`,
 not an attempted encoding of the namespace such as `Submission_X` or `SubmissionX`.
 Reject a name already reserved by another active DAG branch. Reuse of a previously

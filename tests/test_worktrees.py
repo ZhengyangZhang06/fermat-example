@@ -21,11 +21,13 @@ from __init__ import (
 )
 from _recursive_lean.models import (
     Decomposition,
+    DecompositionAudit,
     NaturalAudit,
     NaturalProof,
     NodeRecord,
     SolveResult,
     Subproblem,
+    SubproblemAudit,
 )
 from _recursive_lean.prompts import RLCR_LEAN_TASK
 from _recursive_lean.runtime import Runtime, _WorkspaceAgent, _structured_turn
@@ -54,6 +56,29 @@ def reference_use() -> list[dict[str, Any]]:
         }
         for source in ("TauCeti", "lean-pool", "mathlib-internal")
     ]
+
+
+def accept_decomposition(
+    runtime: Runtime, parent: NodeRecord, decomposition: Decomposition
+) -> None:
+    """Install the independent proof audit required before child activation."""
+    audit = DecompositionAudit(
+        reference_use=reference_use(),
+        acceptable=True,
+        nodes=[
+            SubproblemAudit(
+                key=one.key,
+                acceptable=True,
+                natural_proof_acceptable=True,
+                reason="The fixture child contract and supplied proof are accepted.",
+            )
+            for one in decomposition.subproblems
+        ],
+        required_changes=[],
+    )
+    runtime._accepted_decomposition_audits[
+        runtime._decomposition_digest(parent, decomposition)
+    ] = audit
 
 
 class FakeSession:
@@ -890,6 +915,140 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_child_uses_parent_proof_without_planning_or_prose_generation(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "parent_handoff_problem"
+            project.mkdir()
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=2,
+                    stop_on_child_failure=True,
+                )
+                runtime = Runtime(None, "parent proof handoff fixture", config, {})
+                parent = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Root",
+                    statement="Root theorem",
+                )
+                child = runtime.store.ensure(
+                    "root.child-a1",
+                    parent=parent.id,
+                    depth=1,
+                    title="Child theorem",
+                    statement="The child proposition is true.",
+                    lean_statement="True",
+                    lean_name="child_theorem",
+                )
+                subproblem = Subproblem(
+                    key="child",
+                    title=child.title,
+                    statement=child.statement,
+                    lean_statement=child.lean_statement,
+                    lean_name=child.lean_name,
+                    depends_on=[],
+                    natural_proof=(
+                        "1. The proposition True has its canonical constructor. "
+                        "Therefore the child proposition holds."
+                    ),
+                    proof_key_steps=["Apply the canonical constructor of True."],
+                )
+                audit = SubproblemAudit(
+                    key="child",
+                    acceptable=True,
+                    natural_proof_acceptable=True,
+                    reason="The exact child statement and complete proof are valid.",
+                )
+                runtime._install_parent_supplied_child_handoff(
+                    parent,
+                    child,
+                    subproblem,
+                    audit,
+                    Decomposition(
+                        reference_use=reference_use(),
+                        should_split=False,
+                        rationale="Reference-ledger fixture.",
+                        subproblems=[],
+                    ).reference_use,
+                    [],
+                )
+                atomic = Decomposition(
+                    reference_use=reference_use(),
+                    should_split=False,
+                    rationale="The inherited proof is atomic.",
+                    subproblems=[],
+                )
+                captured: dict[str, Any] = {}
+
+                def formalize(
+                    selected: NodeRecord,
+                    plan: Path,
+                    natural: NaturalProof,
+                    children: list[SolveResult],
+                ) -> SolveResult:
+                    captured.update(
+                        node=selected.id,
+                        plan=plan.name,
+                        proof=natural.proof,
+                        children=children,
+                    )
+                    return SolveResult(ok=True, node_id=selected.id)
+
+                with (
+                    patch.object(
+                        runtime,
+                        "_accepted_plan",
+                        side_effect=AssertionError("child must not generate a plan"),
+                    ),
+                    patch.object(
+                        runtime,
+                        "_accepted_natural_proof",
+                        side_effect=AssertionError("child must not generate prose"),
+                    ),
+                    patch.object(runtime, "_decompose", return_value=atomic),
+                    patch.object(runtime, "_solve_children", return_value=[]),
+                    patch.object(
+                        runtime,
+                        "_formalize_until_accepted",
+                        side_effect=formalize,
+                    ),
+                ):
+                    result = runtime._solve(child)
+
+                self.assertTrue(result.ok)
+                self.assertEqual(captured["node"], child.id)
+                self.assertEqual(captured["plan"], "parent-supplied-plan.md")
+                self.assertEqual(captured["proof"], subproblem.natural_proof)
+                self.assertTrue(child.parent_handoff.endswith("parent-child-handoff.json"))
+
+                # The proof bundle is immutable. A changed proof must fail before any
+                # fallback planner or prose author is invoked.
+                (project / child.natural_proof).write_text(
+                    "tampered proof\n", encoding="utf-8"
+                )
+                with (
+                    patch.object(
+                        runtime,
+                        "_accepted_plan",
+                        side_effect=AssertionError("no fallback child plan"),
+                    ),
+                    patch.object(
+                        runtime,
+                        "_accepted_natural_proof",
+                        side_effect=AssertionError("no fallback child prose"),
+                    ),
+                ):
+                    rejected = runtime._solve(child)
+                self.assertFalse(rejected.ok)
+                self.assertIn("intact", rejected.feedback)
+            finally:
+                os.chdir(original)
+
     def test_overlong_recorded_worktree_is_moved_to_short_path(self) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
@@ -1368,6 +1527,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="slow",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                         Subproblem(
                             key="fast",
@@ -1376,6 +1537,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="fast",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                         Subproblem(
                             key="after_fast",
@@ -1384,6 +1547,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="after_fast",
                             depends_on=["fast"],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                     ],
                 )
@@ -1408,6 +1573,7 @@ class WorktreeTests(unittest.TestCase):
                         moments[f"end:{key}"] = time.monotonic()
                     return SolveResult(ok=True, node_id=node.id)
 
+                accept_decomposition(runtime, parent, decomposition)
                 runtime._solve = solve  # type: ignore[method-assign]
                 results = runtime._solve_children(parent, decomposition, 1)
 
@@ -1817,6 +1983,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="stable_lemma",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                         Subproblem(
                             key="second",
@@ -1825,6 +1993,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="second_lemma",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                     ],
                 )
@@ -1841,6 +2011,7 @@ class WorktreeTests(unittest.TestCase):
                         theorems=runtime._checkpoint_theorems(node),
                     )
 
+                accept_decomposition(runtime, parent, decomposition)
                 runtime._solve = solve  # type: ignore[method-assign]
                 results = runtime._solve_children(parent, decomposition, 9)
 
@@ -1904,6 +2075,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="shared_theorem",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                         Subproblem(
                             key="other",
@@ -1912,6 +2085,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="other_theorem",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                     ],
                 )
@@ -1969,6 +2144,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="False",
                             lean_name="shared_theorem",
                             depends_on=[],
+                            natural_proof="1. Assume the false proposition; this is a fixture proof contract.",
+                            proof_key_steps=["Use the fixture assumption."],
                         ),
                         Subproblem(
                             key="other",
@@ -1977,6 +2154,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="other_theorem",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                     ],
                 )
@@ -2035,6 +2214,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="shared_theorem",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                         Subproblem(
                             key="other",
@@ -2043,6 +2224,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="other_theorem",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                     ],
                 )
@@ -2059,6 +2242,7 @@ class WorktreeTests(unittest.TestCase):
                         theorems=runtime._checkpoint_theorems(node),
                     )
 
+                accept_decomposition(runtime, parent, decomposition)
                 runtime._solve = solve  # type: ignore[method-assign]
 
                 results = runtime._solve_children(parent, decomposition, 1)
@@ -2119,6 +2303,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="accepted_child",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                         Subproblem(
                             key="dependent",
@@ -2127,6 +2313,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="dependent_child",
                             depends_on=["accepted"],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                     ],
                 )
@@ -2142,6 +2330,7 @@ class WorktreeTests(unittest.TestCase):
                         theorems=runtime._checkpoint_theorems(node),
                     )
 
+                accept_decomposition(runtime, parent, decomposition)
                 runtime._solve = solve  # type: ignore[method-assign]
                 with patch.object(runtime, "_submit_resumed_integration") as promote:
                     results = runtime._solve_children(parent, decomposition, 5)
@@ -2405,6 +2594,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="first_child",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                         Subproblem(
                             key="second",
@@ -2413,6 +2604,8 @@ class WorktreeTests(unittest.TestCase):
                             lean_statement="True",
                             lean_name="second_child",
                             depends_on=[],
+                            natural_proof="1. The proposition True follows from its constructor.",
+                            proof_key_steps=["Apply the constructor of True."],
                         ),
                     ],
                 )
@@ -2421,6 +2614,7 @@ class WorktreeTests(unittest.TestCase):
                     node.status = "proved"
                     return SolveResult(ok=True, node_id=node.id)
 
+                accept_decomposition(runtime, parent, decomposition)
                 runtime._solve = solve  # type: ignore[method-assign]
                 with patch.object(
                     runtime, "_submit_speculative_parent", return_value=None

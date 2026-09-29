@@ -1,5 +1,10 @@
 # Recursive Lean prover
 
+> **Parent-supplied-child-proof variant.** This branch is intended for fresh runs. It is
+> deliberately not compatible with child nodes created by the original workflow: an existing
+> child without a reviewed `parent-child-handoff.json` fails closed instead of generating its own
+> plan or natural-language proof. Do not point an already-running experiment at this checkout.
+
 A native Humanize flow for recursively solving large mathematical problems in Lean. It uses the official
 `humanize1:gen-plan` and `humanize1:rlcr` phases, recursively activates subproblem workers,
 requires the repository comparator before and during every Lean review, displays a live DAG,
@@ -22,13 +27,17 @@ official flowverse currently exposes the ported Humanize 1 algorithms; they do n
 flow runs on the old Humanize 1 runtime. There are currently no `official/humanize2:gen-plan` or
 `official/humanize2:rlcr` aliases.
 
-Exactly one scaffold plan is generated in `humanize1:gen-plan` direct mode, with no subsequent
-plan-review or plan-revision stage, and retained unchanged. Mathematical defects are
+Exactly one root scaffold plan is generated in `humanize1:gen-plan` direct mode, with no subsequent
+plan-review or plan-revision stage, and retained unchanged. Recursive children do not call
+`gen-plan` and do not run a natural-language author/reviewer loop. Instead, the parent decomposition
+must supply a complete proof and ordered key steps for every child, and the independent
+decomposition reviewer must approve each supplied proof before any child is activated. Mathematical defects are
 handled by an RLCR-style natural-language loop that repeatedly revises the latest proof draft
 from the fresh reviewer's exact first-invalid-step feedback. Exhausting a configured review
 batch starts another batch from that checkpoint; it does not regenerate the plan or fail the
-node. Decomposition, child, and comparator failures also feed the natural proof, never plan
-generation.
+root node. A rejected proposed child proof returns to the parent's decomposition gate; Lean repair
+keeps the accepted inherited proof frozen and never opens a child planning or prose-generation
+stage.
 
 The upstream direct gen-plan flow still asks its analyst to check that the input belongs to the
 repository and to provide one pre-candidate risk analysis. Those calls happen before the planner
@@ -78,20 +87,24 @@ offline-reproducible and prevents Lake from trying to update shared read-only Gi
    another fetch session.
 3. **Restore or create the theorem node.** The controller loads the durable `dag.json`, preserves
    every accepted checkpoint, and creates the root only when no run exists.
-4. **Generate one scaffold.** The node invokes `humanize1:gen-plan` in direct mode exactly once.
-   The resulting scaffold is frozen. There is no candidate-plan review loop and no later plan
-   regeneration.
-5. **Prove the mathematics in natural language.** A Codex worker writes a complete proof and an
+4. **Generate one root scaffold.** The root invokes `humanize1:gen-plan` in direct mode exactly
+   once. The resulting scaffold is frozen. Children receive a deterministic implementation
+   contract from their parent and never invoke `gen-plan` themselves.
+5. **Prove the root mathematics in natural language.** A Codex worker writes a complete proof and an
    independent Codex reviewer checks the first invalid step. A rejection revises the latest proof,
    not the scaffold. A deep, precisely stated non-circular lemma may be identified as a sourced
-   decomposition obligation rather than expanded into a monograph before recursion starts; its
-   child must still pass the same prose, Lean comparator, and reviewer gates. Vague citations and
-   parent-equivalent obligations are rejected. `natural_proof_attempts` is only the size of one
+   decomposition obligation rather than expanded into a monograph before recursion starts; the
+   following parent decomposition must nevertheless supply that child's complete proof. Vague
+   citations and parent-equivalent obligations are rejected. `natural_proof_attempts` is only the size of one
    checkpoint batch: reaching it starts another batch from the latest draft and cannot kill the
-   node.
+   root node.
 6. **Decide whether to split.** After the prose proof passes, a decomposition audit checks each
-   proposed child theorem, its exact Lean statement and name, and the acyclic dependency list. A
-   child repeats the same lifecycle, so recursive workers also produce prose before Lean. Child
+   proposed child theorem, its exact Lean statement and name, its complete parent-supplied natural
+   proof and key steps, and the acyclic dependency list. The controller freezes these into
+   `parent-child-handoff.json`, `parent-supplied-natural-proof.{json,md}`, and
+   `parent-supplied-plan.md`. A child begins at recursive decomposition of that inherited proof;
+   it cannot generate or revise its own plan or prose. When it splits, its decomposition supplies
+   complete proofs to the grandchildren in the same way. Child
    declaration names are reserved across the whole live DAG: an active cross-branch collision is
    rejected before formal work, while a comparator-accepted declaration may be shared only when
    its frozen Lean type is identical.
@@ -111,9 +124,10 @@ offline-reproducible and prevents Lake from trying to update shared read-only Gi
    continues in the background. If concurrent proofs touched the same file, a separate integration
    worktree preserves both histories and the comparator checks the combined result.
 10. **Publish or revise.** Every accepted theorem is written to the wiki immediately and unlocks its
-   dependants. A mathematical, isolated Lean, comparator, or Lean-review rejection is fed back into
-   the latest natural-language proof at the appropriate upper level; it does not create another
-   plan. A failure caused only by combining already accepted histories stays in `integrating` and
+   dependants. A proposed child proof rejected by decomposition review is repaired by the parent
+   before activation. Once activated, the child's inherited proof is immutable; isolated Lean,
+   comparator, or Lean-review rejection remains in Lean repair and never creates a child plan or
+   prose-authoring pass. A failure caused only by combining already accepted histories stays in `integrating` and
    enters a dedicated Codex repair plus machine/reviewer-comparator loop. It never invalidates or
    restarts the accepted NL proof and never sends false theorem-failure feedback to the parent.
 
@@ -258,12 +272,13 @@ blocking prerequisite.
 
 ## Review gates
 
-- Direct planning performs an input relevance check and one pre-candidate analysis. It skips
-  candidate convergence review and plan revision.
-- A natural-language reviewer runs once the author reports no unresolved gaps. Rejection revises
-  the latest proof draft indefinitely; it never regenerates the plan.
-- A decomposition reviewer checks every proposed child statement, exact frozen Lean type, and
-  dependency edge after the prose proof passes.
+- Root direct planning performs an input relevance check and one pre-candidate analysis. It skips
+  candidate convergence review and plan revision. Children never invoke this stage.
+- A root natural-language reviewer runs once the author reports no unresolved gaps. Rejection
+  revises the latest root proof draft indefinitely; it never regenerates the plan.
+- A decomposition reviewer checks every proposed child statement, exact frozen Lean type,
+  dependency edge, complete supplied proof, and proof key steps after the current node's prose
+  proof passes. A child is not activated unless both its contract and supplied proof pass.
 - The official RLCR implementation loop reviews every Lean worker round against the current audited
   DAG node, frozen type, accepted dependency list, and author comparator. Once that implementation
   reviewer accepts the candidate, RLCR returns control immediately. The bridge explicitly sets
@@ -289,9 +304,11 @@ blocking prerequisite.
 - Every node records a frozen proof-base commit. Kernel-checked definitions and helper lemmas at
   that base may be reused as library infrastructure; the child list governs only post-base
   candidate overlays and is not an exhaustive theorem allowlist.
-- Any mathematical rejection returns to the latest natural-language proof. The full outer
-  comparator/reviewer pass freezes the candidate, marks it `integrating`, publishes it, and
-  unlocks dependants. Only the subsequent canonical integration gate marks the node `proved`.
+- A root mathematical rejection returns to the latest root natural-language proof. A proposed
+  child-proof rejection stays at the parent's decomposition gate. After activation, the child
+  proof bundle is frozen and only Lean repair iterates. The full outer comparator/reviewer pass
+  freezes the candidate, marks it `integrating`, publishes it, and unlocks dependants. Only the
+  subsequent canonical integration gate marks the node `proved`.
 
 ## DAG scheduling
 
@@ -300,9 +317,9 @@ passed both isolated comparator gates enters the global frontier together, up to
 `max_parallel_children`. In speculative mode, every decomposed parent also starts immediately
 against exact-type temporary child assumptions while those child workers continue. Accepted
 `integrating` nodes unlock dependants immediately; their exact candidate commits are overlaid into
-the dependant's isolated worktree. Planning, natural-language proof, decomposition, speculative
-parent coding, Lean implementation, comparator passes, and serialized integration can therefore
-overlap. Same-file reconciliations are performed in a separate
+the dependant's isolated worktree. Root planning/prose, recursive decomposition with parent-proof
+handoffs, speculative parent coding, Lean implementation, comparator passes, and serialized
+integration can therefore overlap. Same-file reconciliations are performed in a separate
 integration worktree and comparator-checked before the canonical branch advances. Any
 reconciliation failure remains in an integration-only repair loop; the accepted node branch,
 scaffold, NL proof, comparator result, reviewer result, theorem identity, and wiki page remain

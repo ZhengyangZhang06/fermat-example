@@ -187,7 +187,7 @@ class NaturalAudit(ReferenceAware):
 
 
 class Subproblem(BaseModel):
-    """One named theorem node in a decomposition."""
+    """One named theorem node and the proof its parent supplies to it."""
 
     model_config = {"extra": "forbid"}
 
@@ -217,6 +217,18 @@ class Subproblem(BaseModel):
     depends_on: list[str] = Field(
         description="keys of sibling subproblems required by this one",
     )
+    natural_proof: str = Field(
+        min_length=20,
+        max_length=200000,
+        description=(
+            "complete numbered natural-language proof of this child theorem, supplied "
+            "by the parent so the child never regenerates a plan or prose proof"
+        ),
+    )
+    proof_key_steps: list[str] = Field(
+        min_length=1,
+        description="ordered logical spine of the parent-supplied child proof",
+    )
 
     @field_validator("lean_statement")
     @classmethod
@@ -224,9 +236,25 @@ class Subproblem(BaseModel):
         """Keep the frozen type usable as one parenthesized Lean term."""
         return validate_lean_statement(value)
 
+    @field_validator("natural_proof")
+    @classmethod
+    def _substantive_natural_proof(cls, value: str) -> str:
+        """Reject whitespace-only text that cannot guide child formalization."""
+        if len(value.strip()) < 20:
+            raise ValueError("parent-supplied child natural_proof is not substantive")
+        return value
+
+    @field_validator("proof_key_steps")
+    @classmethod
+    def _substantive_key_steps(cls, value: list[str]) -> list[str]:
+        """Keep the inherited proof spine readable and nonempty."""
+        if any(not one.strip() for one in value):
+            raise ValueError("parent-supplied proof_key_steps cannot contain blanks")
+        return value
+
 
 class SubproblemAudit(BaseModel):
-    """One independently checked child statement and frozen Lean type."""
+    """One independently checked child contract and parent-supplied proof."""
 
     model_config = {"extra": "forbid"}
 
@@ -234,7 +262,18 @@ class SubproblemAudit(BaseModel):
     acceptable: bool = Field(
         description="whether the prose statement and exact Lean type match and are sound"
     )
+    natural_proof_acceptable: bool = Field(
+        description=(
+            "whether the supplied proof is complete, non-circular, and proves the "
+            "child's exact statement"
+        )
+    )
     reason: str = Field(description="specific justification or first blocking defect")
+
+    @property
+    def passed(self) -> bool:
+        """Whether both the theorem contract and its inherited proof passed review."""
+        return self.acceptable and self.natural_proof_acceptable
 
 
 class DecompositionAudit(ReferenceAware):
@@ -257,9 +296,34 @@ class DecompositionAudit(ReferenceAware):
         """Whether global and per-child verdicts consistently approve."""
         return (
             self.acceptable
-            and all(one.acceptable for one in self.nodes)
+            and all(one.passed for one in self.nodes)
             and not self.required_changes
         )
+
+
+class ChildProofHandoff(ReferenceAware):
+    """Durable, independently reviewed proof material passed from parent to child."""
+
+    model_config = {"extra": "forbid"}
+
+    parent_id: str = Field(min_length=1)
+    child_id: str = Field(min_length=1)
+    subproblem: Subproblem
+    audit: SubproblemAudit
+    resolved_dependencies: list[str]
+    plan_path: str = Field(min_length=1)
+    natural_proof_path: str = Field(min_length=1)
+    structured_proof_path: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> ChildProofHandoff:
+        if self.audit.key != self.subproblem.key:
+            raise ValueError("child handoff audit key must match the subproblem key")
+        if not self.audit.passed:
+            raise ValueError("child handoff requires an accepted independent proof audit")
+        if len(self.resolved_dependencies) != len(self.subproblem.depends_on):
+            raise ValueError("child handoff dependency resolution is incomplete")
+        return self
 
 
 def _no_subproblems() -> list[Subproblem]:
@@ -401,6 +465,7 @@ class NodeRecord(BaseModel):
     lean_attempts: int = 0
     plan: str = ""
     natural_proof: str = ""
+    parent_handoff: str = ""
     lean_files: list[str] = Field(default_factory=list)
     worktree: str = ""
     proof_branch: str = ""

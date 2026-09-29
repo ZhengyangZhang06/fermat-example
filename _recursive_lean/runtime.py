@@ -22,6 +22,7 @@ import fcntl
 from hmz.flows import Stopped, load
 
 from .models import (
+    ChildProofHandoff,
     Decomposition,
     DecompositionAudit,
     FetchedProblem,
@@ -33,6 +34,7 @@ from .models import (
     ReferenceUse,
     SolveResult,
     Subproblem,
+    SubproblemAudit,
 )
 from .preflight import (
     PROBLEM_COLLECTION_URL,
@@ -277,6 +279,7 @@ class Runtime:
         )
         self._integration_futures: dict[str, Any] = {}
         self._speculation_futures: dict[str, Any] = {}
+        self._accepted_decomposition_audits: dict[str, DecompositionAudit] = {}
         self.run_root = self._run_root()
         self.store = Store(
             self.run_root,
@@ -881,28 +884,39 @@ class Runtime:
         if node.status == "integrating" and node.candidate_commit:
             return self._resume_accepted_candidate(node)
         feedback = node.message if node.status == "failed" else "None."
-        # Once a plan passes its independent gate it is a stable scaffold.  Subsequent
-        # mathematical corrections iterate the natural-language proof from its latest
-        # checkpoint; they do not generate a fresh plan on every outer attempt.
-        plan = self._recorded_plan(node)
-        # A restart can happen after prose review succeeds but before decomposition has
-        # created any children.  In that state ``node.children`` is still empty, so the
-        # global frontier deliberately calls back into ``_solve``.  Preserve the accepted
-        # prose checkpoint instead of sending it through author/reviewer RLCR again.
-        accepted_natural = self._accepted_natural_checkpoint(node)
-        if plan is None:
-            # A stopped direct gen-plan may leave either its substantive output in the
-            # atomic-write temporary file or only the controller's concrete input draft.
-            # Both are sufficient as an immutable scaffold: mathematical correction
-            # belongs to the NL-proof loop, never to another plan generation/review loop.
-            plan = self._preserved_plan(node)
-            if plan is not None:
-                self.store.update(
-                    node.id,
-                    "natural-proof",
-                    f"existing scaffold {plan.name} frozen; iterate only the NL proof",
-                    plan=str(plan.relative_to(self.project)),
+        inherited_natural: NaturalProof | None = None
+        if node.parent is not None:
+            # A child is deliberately not a miniature root run.  Its independently
+            # reviewed proof and implementation scaffold are supplied by its parent.
+            # Fail closed rather than silently falling back to child planning or prose
+            # generation when that durable handoff is absent or has been modified.
+            inherited = self._parent_supplied_child_checkpoint(node)
+            if inherited is None:
+                feedback = (
+                    "child lacks an intact, independently reviewed parent proof handoff; "
+                    "child planning and natural-language proof generation are disabled"
                 )
+                self.store.update(node.id, "failed", feedback)
+                return SolveResult(ok=False, node_id=node.id, feedback=feedback)
+            plan, inherited_natural = inherited
+            accepted_natural = None
+        else:
+            # Root-only path: once a plan passes its gate it is a stable scaffold.
+            # Subsequent mathematical corrections iterate the natural-language proof
+            # from its latest checkpoint; they do not regenerate the plan.
+            plan = self._recorded_plan(node)
+            # A restart can happen after prose review succeeds but before decomposition
+            # creates children. Preserve that accepted root prose checkpoint.
+            accepted_natural = self._accepted_natural_checkpoint(node)
+            if plan is None:
+                plan = self._preserved_plan(node)
+                if plan is not None:
+                    self.store.update(
+                        node.id,
+                        "natural-proof",
+                        f"existing scaffold {plan.name} frozen; iterate only the NL proof",
+                        plan=str(plan.relative_to(self.project)),
+                    )
         plan_attempted = plan is not None
         while True:
             node.attempts += 1
@@ -919,10 +933,11 @@ class Runtime:
                     "One-time direct plan generation produced no usable scaffold."
                 )
                 break
-            natural = accepted_natural
-            accepted_natural = None
-            if natural is None:
-                natural = self._accepted_natural_proof(node, plan, feedback)
+            natural = inherited_natural if node.parent is not None else accepted_natural
+            if node.parent is None:
+                accepted_natural = None
+                if natural is None:
+                    natural = self._accepted_natural_proof(node, plan, feedback)
             if natural is None:
                 feedback = "No complete natural-language proof survived review."
                 continue
@@ -934,7 +949,10 @@ class Runtime:
                 continue
             children = self._solve_children(node, decomposition, attempt)
             failed = [one for one in children if not one.ok]
-            if failed and self.config.stop_on_child_failure:
+            controller_failure = any(one.node_id == node.id for one in failed)
+            if failed and (
+                controller_failure or self.config.stop_on_child_failure
+            ):
                 feedback = "Required child failure(s): " + "; ".join(
                     f"{one.node_id}: {one.feedback}" for one in failed
                 )
@@ -1307,9 +1325,262 @@ class Runtime:
                 feedback = name_problem
                 self.store.update(node.id, "decomposing", feedback)
                 continue
+            with self._graph_lock:
+                self._accepted_decomposition_audits[
+                    self._decomposition_digest(node, made)
+                ] = audit
             return made
         self.store.update(node.id, "decomposing", feedback)
         return None
+
+    @staticmethod
+    def _decomposition_digest(parent: NodeRecord, made: Decomposition) -> str:
+        """Identify the exact independently reviewed parent decomposition."""
+        payload = json.dumps(
+            {
+                "parent_id": parent.id,
+                "decomposition": made.model_dump(mode="json"),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def _accepted_decomposition_audit(
+        self, parent: NodeRecord, made: Decomposition
+    ) -> DecompositionAudit | None:
+        """Recover the exact passing audit that authorized child activation."""
+        digest = self._decomposition_digest(parent, made)
+        with self._graph_lock:
+            cached = self._accepted_decomposition_audits.get(digest)
+        if cached is not None and cached.passed:
+            return cached
+
+        # The in-memory cache is sufficient during an uninterrupted call.  Reload the
+        # paired artifacts as a restart-safe fallback and require byte-equivalent models.
+        node_dir = self._node_dir(parent)
+        candidates = sorted(
+            node_dir.glob("decomposition-v*.json"),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+        for decomposition_path in candidates:
+            version = decomposition_path.stem.rsplit("v", 1)[-1]
+            audit_path = node_dir / f"decomposition-audit-v{version}.json"
+            try:
+                recorded = Decomposition.model_validate_json(
+                    decomposition_path.read_text(encoding="utf-8")
+                )
+                audit = DecompositionAudit.model_validate_json(
+                    audit_path.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                continue
+            if recorded != made or not audit.passed:
+                continue
+            expected = [one.key for one in made.subproblems]
+            if [one.key for one in audit.nodes] != expected:
+                continue
+            with self._graph_lock:
+                self._accepted_decomposition_audits[digest] = audit
+            return audit
+        return None
+
+    def _render_parent_supplied_plan(self, handoff: ChildProofHandoff) -> str:
+        """Create the non-model implementation scaffold supplied with a child."""
+        dependency_text = (
+            "\n".join(f"- `{one}`" for one in handoff.resolved_dependencies)
+            or "- None."
+        )
+        return f"""# Parent-supplied child implementation contract
+
+This scaffold was created deterministically by the controller. DAG child
+`{handoff.child_id}` must not run plan generation or natural-language proof generation.
+Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
+
+## Frozen theorem
+
+- Parent node: `{handoff.parent_id}`
+- Child key: `{handoff.subproblem.key}`
+- Declaration: `Submission.{handoff.subproblem.lean_name}`
+- Exact Lean type: `{handoff.subproblem.lean_statement}`
+
+## Sibling prerequisites
+
+{dependency_text}
+
+## Implementation steps
+
+1. Read the complete parent-supplied natural-language proof.
+2. Formalize exactly the frozen theorem without weakening or replacing it.
+3. Use only the listed accepted sibling prerequisites and ordinary frozen proof-base helpers.
+4. Run the configured author-side child comparator and return a committed candidate. The outer
+   controller, not this nested implementation loop, owns the independent reviewer comparator.
+"""
+
+    def _render_parent_supplied_natural(self, handoff: ChildProofHandoff) -> str:
+        """Render the exact proof a parent hands to one child."""
+        return (
+            "# Parent-supplied natural-language proof\n\n"
+            f"- Parent DAG node: `{handoff.parent_id}`\n"
+            f"- Child DAG node: `{handoff.child_id}`\n"
+            "- Review gate: accepted as part of the parent's decomposition audit\n\n"
+            "## Proof\n\n"
+            f"{handoff.subproblem.natural_proof.strip()}\n\n"
+            "## Key steps\n\n"
+            + "\n".join(
+                f"{index}. {step}"
+                for index, step in enumerate(
+                    handoff.subproblem.proof_key_steps, 1
+                )
+            )
+            + "\n\n## Reference use\n\n"
+            + self._reference_use_markdown(handoff.reference_use)
+            + "\n"
+        )
+
+    def _install_parent_supplied_child_handoff(
+        self,
+        parent: NodeRecord,
+        child: NodeRecord,
+        subproblem: Subproblem,
+        audit: SubproblemAudit,
+        reference_use: list[ReferenceUse],
+        resolved_dependencies: list[str],
+    ) -> None:
+        """Freeze one reviewed parent proof before the child worker can start."""
+        if self._accepted_checkpoint(child):
+            return
+        if child.parent_handoff:
+            loaded = self._parent_supplied_child_checkpoint(child)
+            try:
+                existing = ChildProofHandoff.model_validate_json(
+                    (self.project / child.parent_handoff).read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError) as error:
+                raise RuntimeError(
+                    f"existing child handoff is unreadable for {child.id}: {error}"
+                ) from error
+            if (
+                loaded is None
+                or existing.parent_id != parent.id
+                or existing.subproblem != subproblem
+                or existing.audit != audit
+                or existing.resolved_dependencies != resolved_dependencies
+            ):
+                raise RuntimeError(
+                    f"existing child handoff disagrees with frozen contract for {child.id}"
+                )
+            return
+        if child.plan or child.natural_proof:
+            raise RuntimeError(
+                f"child {child.id} has legacy self-generated proof artifacts and cannot "
+                "be silently migrated to parent-supplied proof mode"
+            )
+
+        node_dir = self._node_dir(child)
+        plan_path = node_dir / "parent-supplied-plan.md"
+        natural_path = node_dir / "parent-supplied-natural-proof.md"
+        structured_path = node_dir / "parent-supplied-natural-proof.json"
+        handoff_path = node_dir / "parent-child-handoff.json"
+
+        def relative(path: Path) -> str:
+            return str(path.relative_to(self.project))
+
+        handoff = ChildProofHandoff(
+            reference_use=reference_use,
+            parent_id=parent.id,
+            child_id=child.id,
+            subproblem=subproblem,
+            audit=audit,
+            resolved_dependencies=resolved_dependencies,
+            plan_path=relative(plan_path),
+            natural_proof_path=relative(natural_path),
+            structured_proof_path=relative(structured_path),
+        )
+        proof = NaturalProof(
+            reference_use=handoff.reference_use,
+            proof=subproblem.natural_proof,
+            key_steps=subproblem.proof_key_steps,
+            unresolved=[],
+        )
+        atomic_text(structured_path, proof.model_dump_json(indent=2) + "\n")
+        atomic_text(natural_path, self._render_parent_supplied_natural(handoff))
+        atomic_text(plan_path, self._render_parent_supplied_plan(handoff))
+        # Publish the manifest last: its presence means all referenced material exists.
+        atomic_text(handoff_path, handoff.model_dump_json(indent=2) + "\n")
+        self.store.update(
+            child.id,
+            "decomposing",
+            (
+                "parent-supplied natural proof frozen; child planning and "
+                "natural-language proof generation skipped"
+            ),
+            plan=relative(plan_path),
+            natural_proof=relative(natural_path),
+            parent_handoff=relative(handoff_path),
+        )
+
+    def _parent_supplied_child_checkpoint(
+        self, node: NodeRecord
+    ) -> tuple[Path, NaturalProof] | None:
+        """Validate and load an immutable parent-to-child proof handoff."""
+        if node.parent is None or not node.parent_handoff:
+            return None
+
+        def controlled_path(relative: str) -> Path | None:
+            candidate = (self.project / relative).resolve()
+            try:
+                candidate.relative_to(self.project)
+            except ValueError:
+                return None
+            return candidate
+
+        manifest_path = controlled_path(node.parent_handoff)
+        if manifest_path is None:
+            return None
+        try:
+            handoff = ChildProofHandoff.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            return None
+        if (
+            handoff.parent_id != node.parent
+            or handoff.child_id != node.id
+            or handoff.subproblem.title != node.title
+            or handoff.subproblem.statement != node.statement
+            or handoff.subproblem.lean_statement != node.lean_statement
+            or handoff.subproblem.lean_name != node.lean_name
+            or handoff.resolved_dependencies != node.depends_on
+            or handoff.plan_path != node.plan
+            or handoff.natural_proof_path != node.natural_proof
+        ):
+            return None
+        plan_path = controlled_path(handoff.plan_path)
+        natural_path = controlled_path(handoff.natural_proof_path)
+        structured_path = controlled_path(handoff.structured_proof_path)
+        if plan_path is None or natural_path is None or structured_path is None:
+            return None
+        try:
+            proof = NaturalProof.model_validate_json(
+                structured_path.read_text(encoding="utf-8")
+            )
+            plan_text = plan_path.read_text(encoding="utf-8")
+            natural_text = natural_path.read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            return None
+        if (
+            proof.proof != handoff.subproblem.natural_proof
+            or proof.key_steps != handoff.subproblem.proof_key_steps
+            or proof.unresolved
+            or proof.reference_use != handoff.reference_use
+            or plan_text != self._render_parent_supplied_plan(handoff)
+            or natural_text != self._render_parent_supplied_natural(handoff)
+        ):
+            return None
+        return plan_path, proof
 
     def _solve_children(
         self,
@@ -1317,14 +1588,15 @@ class Runtime:
         decomposition: Decomposition,
         parent_attempt: int,
     ) -> list[SolveResult]:
-        """Activate every theorem worker, gating only dependency-consuming Lean work.
+        """Freeze parent proofs and activate every child theorem worker.
 
         A Lean theorem name is the stable identity of a child below one parent.  Outer
         retries may revise prose or decomposition, but they may not create ``-a2`` copies
         of an already accepted ``-a1`` theorem or send that theorem through proof stages
-        again.  Sibling dependencies do not prevent planning, research, natural-language
-        proof, or recursive decomposition.  Each worker pauses at ``waiting-lean`` before
-        formalization until its accepted prerequisite checkpoints are available.
+        again. Every new child receives the exact proof approved by the parent's independent
+        decomposition reviewer and skips its own planning and prose-generation stages.
+        Sibling dependencies do not prevent recursive decomposition. Each worker pauses at
+        ``waiting-lean`` before dependency-consuming formalization when speculation is off.
         """
         del parent_attempt
         if not decomposition.should_split:
@@ -1384,9 +1656,18 @@ class Runtime:
                         ),
                     )
                 ]
+            accepted_audit = self._accepted_decomposition_audit(parent, decomposition)
+            if accepted_audit is None:
+                feedback = (
+                    "child activation requires the exact passing decomposition audit that "
+                    "approved every parent-supplied child proof"
+                )
+                self.store.update(parent.id, "decomposing", feedback)
+                return [SolveResult(ok=False, node_id=parent.id, feedback=feedback)]
+            audits = {one.key: one for one in accepted_audit.nodes}
             made: dict[str, NodeRecord] = {}
             for one in decomposition.subproblems:
-                made[one.key] = self.store.ensure(
+                child = self.store.ensure(
                     ids[one.key],
                     parent=parent.id,
                     depth=parent.depth + 1,
@@ -1396,6 +1677,26 @@ class Runtime:
                     lean_name=one.lean_name,
                     depends_on=[ids[key] for key in one.depends_on],
                 )
+                made[one.key] = child
+                try:
+                    self._install_parent_supplied_child_handoff(
+                        parent,
+                        child,
+                        one,
+                        audits[one.key],
+                        decomposition.reference_use,
+                        [ids[key] for key in one.depends_on],
+                    )
+                except (KeyError, RuntimeError, ValueError) as error:
+                    feedback = f"could not freeze child proof handoff: {error}"
+                    self.store.update(parent.id, "decomposing", feedback)
+                    return [
+                        SolveResult(
+                            ok=False,
+                            node_id=parent.id,
+                            feedback=feedback,
+                        )
+                    ]
             retained_children = list(dict.fromkeys(ids.values()))
             if parent.children != retained_children:
                 parent.children = retained_children
@@ -1708,34 +2009,44 @@ class Runtime:
     def _formalize_checkpoint_parent(self, node: NodeRecord) -> SolveResult:
         """Finalize a resumed parent after its real children replace any assumptions."""
         self._wait_for_speculation(node)
-        plan = self._recorded_plan(node) or self._preserved_plan(node)
-        if plan is None or not node.natural_proof:
-            return SolveResult(
-                ok=False,
-                node_id=node.id,
-                feedback="resumed parent lacks a frozen plan or accepted NL proof",
+        if node.parent is not None:
+            inherited = self._parent_supplied_child_checkpoint(node)
+            if inherited is None:
+                return SolveResult(
+                    ok=False,
+                    node_id=node.id,
+                    feedback="resumed child lacks an intact parent-supplied proof handoff",
+                )
+            plan, natural = inherited
+        else:
+            plan = self._recorded_plan(node) or self._preserved_plan(node)
+            if plan is None or not node.natural_proof:
+                return SolveResult(
+                    ok=False,
+                    node_id=node.id,
+                    feedback="resumed parent lacks a frozen plan or accepted NL proof",
+                )
+            natural_path = self.project / node.natural_proof
+            try:
+                proof = natural_path.read_text(encoding="utf-8").strip()
+            except OSError as error:
+                return SolveResult(ok=False, node_id=node.id, feedback=str(error))
+            reference_use = self._accepted_reference_use(node)
+            if reference_use is None:
+                return SolveResult(
+                    ok=False,
+                    node_id=node.id,
+                    feedback=(
+                        "accepted natural proof lacks the mandatory three-source "
+                        "reference-use ledger"
+                    ),
+                )
+            natural = NaturalProof(
+                reference_use=reference_use,
+                proof=proof,
+                key_steps=["Use the preserved independently accepted natural proof."],
+                unresolved=[],
             )
-        natural_path = self.project / node.natural_proof
-        try:
-            proof = natural_path.read_text(encoding="utf-8").strip()
-        except OSError as error:
-            return SolveResult(ok=False, node_id=node.id, feedback=str(error))
-        reference_use = self._accepted_reference_use(node)
-        if reference_use is None:
-            return SolveResult(
-                ok=False,
-                node_id=node.id,
-                feedback=(
-                    "accepted natural proof lacks the mandatory three-source "
-                    "reference-use ledger"
-                ),
-            )
-        natural = NaturalProof(
-            reference_use=reference_use,
-            proof=proof,
-            key_steps=["Use the preserved independently accepted natural proof."],
-            unresolved=[],
-        )
         children = [
             SolveResult(
                 ok=True,
@@ -4209,6 +4520,9 @@ not blockers for completion of this implementation-only plan.
 
     def _accepted_reference_use(self, node: NodeRecord) -> list[ReferenceUse] | None:
         """Load the source-use ledger paired with an accepted natural proof."""
+        if node.parent is not None:
+            inherited = self._parent_supplied_child_checkpoint(node)
+            return inherited[1].reference_use if inherited is not None else None
         if not node.natural_proof:
             return None
         match = re.search(r"natural-proof-v(\d+)\.md$", node.natural_proof)
