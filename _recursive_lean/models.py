@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -326,6 +327,78 @@ class ChildProofHandoff(ReferenceAware):
         return self
 
 
+class GitWorkspaceChild(BaseModel):
+    """One child entry published in an immutable parent dispatch branch."""
+
+    model_config = {"extra": "forbid"}
+
+    node_id: str = Field(min_length=1)
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    result_branch: str = Field(min_length=1)
+    bundle_path: str = Field(min_length=1)
+    handoff: ChildProofHandoff
+
+    @field_validator("result_branch", "bundle_path")
+    @classmethod
+    def _safe_repository_value(cls, value: str) -> str:
+        normalized = value.strip().strip("/")
+        if (
+            not normalized
+            or ".." in normalized.split("/")
+            or "\x00" in normalized
+            or "\\" in normalized
+            or re.search(r"[\s~^:?*\[]", normalized)
+            or normalized.startswith("-")
+            or normalized.endswith(".lock")
+        ):
+            raise ValueError("must be a safe repository-relative value")
+        return normalized
+
+
+class GitWorkspaceDispatch(BaseModel):
+    """Content-addressed handoff committed by one parent for all of its children."""
+
+    model_config = {"extra": "forbid"}
+
+    schema_version: Literal[1] = 1
+    run_id: str = Field(min_length=1)
+    parent_id: str = Field(min_length=1)
+    dispatch_branch: str = Field(min_length=1)
+    source_commit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    comparator_command: str = Field(min_length=1)
+    comparator_success: str = Field(min_length=1)
+    lean_target: str
+    children: list[GitWorkspaceChild]
+    files: dict[str, str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> GitWorkspaceDispatch:
+        node_ids = [one.node_id for one in self.children]
+        keys = [one.key for one in self.children]
+        branches = [one.result_branch for one in self.children]
+        if len(node_ids) != len(set(node_ids)):
+            raise ValueError("workspace child node ids must be unique")
+        if len(keys) != len(set(keys)):
+            raise ValueError("workspace child keys must be unique")
+        if len(branches) != len(set(branches)):
+            raise ValueError("workspace child result branches must be unique")
+        for path, digest in self.files.items():
+            parsed = Path(path)
+            if (
+                not path
+                or parsed.is_absolute()
+                or ".." in parsed.parts
+                or "\x00" in path
+                or "\\" in path
+                or ":" in path
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            ):
+                raise ValueError(
+                    "workspace file entries require safe paths and SHA-256 digests"
+                )
+        return self
+
+
 def _no_subproblems() -> list[Subproblem]:
     """Give Pydantic a precisely typed fresh default."""
     return []
@@ -466,6 +539,15 @@ class NodeRecord(BaseModel):
     plan: str = ""
     natural_proof: str = ""
     parent_handoff: str = ""
+    workspace_remote: str = ""
+    workspace_manifest_path: str = ""
+    workspace_bundle_path: str = ""
+    workspace_handoff_branch: str = ""
+    workspace_handoff_commit: str = ""
+    workspace_result_branch: str = ""
+    workspace_result_commit: str = ""
+    workspace_dispatch_branch: str = ""
+    workspace_dispatch_commit: str = ""
     lean_files: list[str] = Field(default_factory=list)
     worktree: str = ""
     proof_branch: str = ""

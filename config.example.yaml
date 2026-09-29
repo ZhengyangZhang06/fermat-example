@@ -34,6 +34,15 @@ lean_target: ""
 comparator_command: bash tools/check-with-comparator.sh
 comparator_success: Your solution is okay!
 
+# Optional remote-backed node workspace. When set, every accepted parent
+# decomposition is committed and pushed to one immutable dispatch branch before
+# any child starts. Each child fetches that branch and pushes its independently
+# reviewed result to a unique result branch. The remote must already exist in
+# the problem repository and have non-interactive fetch/push authentication.
+github_workspace_remote: ""
+github_workspace_branch_prefix: humanize-workspace
+github_workspace_push_timeout: 300
+
 artifact_dir: .humanize/recursive-lean-prover
 wiki_dir: .humanize/math-wiki
 stop_on_child_failure: true

@@ -270,6 +270,11 @@ class Store:
 - Proof base commit: `{node.proof_base_commit or "not recorded"}`
 - Reviewed candidate commit: `{node.candidate_commit or "not recorded"}`
 - Integrated problem commit: `{node.integrated_commit or "not recorded"}`
+- GitHub workspace remote: `{node.workspace_remote or "not configured"}`
+- Parent dispatch branch: `{node.workspace_handoff_branch or "not recorded"}`
+- Parent dispatch commit: `{node.workspace_handoff_commit or "not recorded"}`
+- Child result branch: `{node.workspace_result_branch or "not recorded"}`
+- Pushed child result commit: `{node.workspace_result_commit or "not recorded"}`
 - Fetched problem artifact: `{self.problem_artifact or "not recorded"}`
 - Reference snapshot manifest: `{self.reference_manifest or "not recorded"}`
 - Mandatory reference corpora: `TauCeti`, `lean-pool`, `mathlib-internal`

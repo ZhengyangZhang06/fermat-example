@@ -1,6 +1,6 @@
 # Recursive Lean prover
 
-> **Parent-supplied-child-proof variant.** This branch is intended for fresh runs. It is
+> **Parent-supplied-child-proof + GitHub-workspace variant.** This branch is intended for fresh runs. It is
 > deliberately not compatible with child nodes created by the original workflow: an existing
 > child without a reviewed `parent-child-handoff.json` fails closed instead of generating its own
 > plan or natural-language proof. Do not point an already-running experiment at this checkout.
@@ -38,6 +38,15 @@ batch starts another batch from that checkpoint; it does not regenerate the plan
 root node. A rejected proposed child proof returns to the parent's decomposition gate; Lean repair
 keeps the accepted inherited proof frozen and never opens a child planning or prose-generation
 stage.
+
+When `github_workspace_remote` is configured, every accepted split is also exchanged through the
+problem repository's GitHub remote. The parent commits one immutable dispatch branch containing
+the reviewed decomposition and audit, all child theorem/proof bundles, fetched problem artifacts,
+reference snapshot manifest, task, and controller contract. Every child fetches that exact commit,
+checks all bundled SHA-256 digests, reconstructs any missing local handoff files, and creates its
+own result branch from the dispatch commit. Only after the child comparator and independent
+reviewer comparator both pass does the controller push that result branch. Siblings never push to
+one shared writable branch.
 
 The upstream direct gen-plan flow still asks its analyst to check that the input belongs to the
 repository and to provide one pre-candidate risk analysis. Those calls happen before the planner
@@ -108,6 +117,10 @@ offline-reproducible and prevents Lake from trying to update shared read-only Gi
    declaration names are reserved across the whole live DAG: an active cross-branch collision is
    rejected before formal work, while a comparator-accepted declaration may be shared only when
    its frozen Lean type is identical.
+   With a configured GitHub workspace remote, the controller then publishes the whole reviewed
+   split to one immutable parent dispatch branch before starting any child. The dispatch commit is
+   the frozen Git base of every child result branch, so handoff files remain remotely auditable but
+   are excluded from the candidate commit range later integrated into the canonical problem branch.
 7. **Launch the ready frontier.** Every node whose explicit prerequisites and required children
    have passed both isolated comparator gates is launched, up to `max_parallel_children`.
    Independent leaves from the same problem run together. A parent may therefore start while an
@@ -123,6 +136,9 @@ offline-reproducible and prevents Lake from trying to update shared read-only Gi
    immutable accepted checkpoint and immediately unlocks dependants while canonical integration
    continues in the background. If concurrent proofs touched the same file, a separate integration
    worktree preserves both histories and the comparator checks the combined result.
+   A non-root node configured for GitHub workspace exchange must also push the exact reviewed commit
+   to its unique result branch before it becomes an accepted checkpoint. Parents fetch that remote
+   result commit again before overlay or integration; a moved or divergent branch fails closed.
 10. **Publish or revise.** Every accepted theorem is written to the wiki immediately and unlocks its
    dependants. A proposed child proof rejected by decomposition review is repaired by the parent
    before activation. Once activated, the child's inherited proof is immutable; isolated Lean,
@@ -144,6 +160,8 @@ offline-reproducible and prevents Lake from trying to update shared read-only Gi
   through a Git askpass environment and is not written to YAML, prompts, manifests, logs, or Git
   remote URLs.
 - Run at the root of a clean Lean git repository.
+- For remote-backed node exchange, add a writable GitHub remote to that problem repository and use
+  non-interactive SSH or credential-helper authentication. Do not embed tokens in the remote URL.
 - Provide a comparator wrapper such as `tools/check-with-comparator.sh`.
 - The comparator must exit zero and print the configured success marker.
 - Use Codex for both declared roles. The two roles are separate agents and therefore keep
@@ -209,6 +227,21 @@ Copy and edit the example config, especially `lean_target` and `comparator_comma
 cp ~/.humanize/flows/recursive_lean_prover/config.example.yaml ./recursive-proof.yaml
 ```
 
+To enable GitHub workspace exchange, first add or verify a writable remote in the **problem
+repository**, then name it in the config:
+
+```sh
+git remote add proof-workspace git@github.com:YOUR_ORG/YOUR_PROBLEM_REPOSITORY.git
+# recursive-proof.yaml:
+# github_workspace_remote: proof-workspace
+```
+
+For a parent node `P`, the flow pushes one branch below
+`<prefix>/<project>/<run>/dispatch/<P>`. Each child has a separate
+`humanize-recursive/<project>/<run>/<child>-aN` result branch. Dispatch branches are immutable;
+the flow refuses a changed remote head, digest mismatch, foreign file, divergent result writer, or
+local handoff that differs from the fetched bundle.
+
 The settings most often changed are:
 
 - `max_depth`: deepest recursive decomposition level; the root is depth 0.
@@ -224,6 +257,10 @@ The settings most often changed are:
 - `huggingface_token_env`: name of the environment variable carrying the private dataset token.
 - `lean_target`: project-relative candidate `.lean` file.
 - `comparator_command`: argv-style command; it is not evaluated by a shell.
+- `github_workspace_remote`: existing problem-repository Git remote used for dispatch/result
+  exchange; blank disables remote exchange.
+- `github_workspace_branch_prefix`: namespace for immutable parent dispatch branches.
+- `github_workspace_push_timeout`: bound for each remote query, fetch, and push.
 
 Then run both worker and reviewer on Codex:
 
@@ -326,6 +363,12 @@ scaffold, NL proof, comparator result, reviewer result, theorem identity, and wi
 immutable checkpoints. Re-decomposition reuses an existing accepted Lean theorem by name at any
 depth instead of creating an `-a2` copy or proving it again. The root still waits for every
 descendant integration future before final acceptance.
+
+With remote exchange enabled, `dag.json` also records each node's dispatch remote, immutable
+handoff branch/commit, child result branch/commit, manifest path, and bundle path. Those fields are
+the resume authority: missing coordinates, a rewritten dispatch head, a result head that does not
+equal the reviewed candidate, or a branch outside the recorded ancestry stops that child instead
+of falling back to local-only work.
 
 ## Safety and stopping
 

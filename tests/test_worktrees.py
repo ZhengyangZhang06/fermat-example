@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import patch
 
 from __init__ import (
+    Config,
     WorktreeRlcrConfig,
     _nested_rlcr_config,
     _require_explicit_rlcr_review_skip,
@@ -22,6 +23,7 @@ from __init__ import (
 from _recursive_lean.models import (
     Decomposition,
     DecompositionAudit,
+    GitWorkspaceDispatch,
     NaturalAudit,
     NaturalProof,
     NodeRecord,
@@ -156,6 +158,18 @@ class StreamedAnswerAgent:
 
 
 class WorktreeTests(unittest.TestCase):
+    def test_github_workspace_config_normalizes_safe_branch_namespace(self) -> None:
+        configured = Config(
+            github_workspace_remote="github",
+            github_workspace_branch_prefix="team/lean-handoffs/",
+        )
+        self.assertEqual(configured.github_workspace_remote, "github")
+        self.assertEqual(
+            configured.github_workspace_branch_prefix, "team/lean-handoffs"
+        )
+        with self.assertRaises(ValueError):
+            Config(github_workspace_branch_prefix="../unsafe")
+
     def test_overlong_slugs_keep_distinct_hash_suffixes(self) -> None:
         shared = "root." + ".very_long_generated_dependency" * 5
         first = slug(shared + ".first_child")
@@ -1046,6 +1060,228 @@ class WorktreeTests(unittest.TestCase):
                     rejected = runtime._solve(child)
                 self.assertFalse(rejected.ok)
                 self.assertIn("intact", rejected.feedback)
+            finally:
+                os.chdir(original)
+
+    def test_parent_dispatches_handoffs_and_child_pushes_reviewed_result(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            remote = root / "github-workspace.git"
+            project = root / "workspace_problem"
+            git(root, "init", "--bare", str(remote))
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text(
+                "namespace Submission\nend Submission\n"
+            )
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize workspace fixture")
+            git(project, "remote", "add", "workspace", str(remote))
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=2,
+                    github_workspace_remote="workspace",
+                    github_workspace_branch_prefix="humanize-workspace",
+                    github_workspace_push_timeout=30,
+                    comparator_command="bash tools/check-with-comparator.sh",
+                    comparator_success="Your solution is okay!",
+                    lean_target="Submission.lean",
+                    rlcr_rounds=3,
+                    max_depth=2,
+                    max_children=2,
+                )
+                runtime = Runtime(None, "remote child workspace fixture", config, {})
+                runtime.problem_id = "workspace_problem"
+                runtime.problem_path.write_text("# Workspace problem\n")
+                (runtime.run_root / "problem.json").write_text(
+                    '{"problem_id":"workspace_problem"}\n'
+                )
+                reference_manifest = runtime.run_root / "reference-manifest.json"
+                reference_manifest.write_text('{"sources":[]}\n')
+                runtime.store.reference_manifest = str(reference_manifest)
+                parent = runtime.store.ensure(
+                    "root",
+                    parent=None,
+                    depth=0,
+                    title="Root",
+                    statement="Root theorem",
+                )
+                subproblems = [
+                    Subproblem(
+                        key=f"child_{number}",
+                        title=f"Child theorem {number}",
+                        statement=f"The child proposition {number} is true.",
+                        lean_statement="True",
+                        lean_name=f"child_theorem_{number}",
+                        depends_on=[] if number == 1 else ["child_1"],
+                        natural_proof=(
+                            f"1. Child proposition {number} is True, so its canonical "
+                            "constructor proves the exact statement."
+                        ),
+                        proof_key_steps=["Apply the canonical constructor of True."],
+                    )
+                    for number in (1, 2)
+                ]
+                decomposition = Decomposition(
+                    reference_use=reference_use(),
+                    should_split=True,
+                    rationale="Two remote child workspaces exercise parallel handoff.",
+                    subproblems=subproblems,
+                )
+                audit = DecompositionAudit(
+                    reference_use=reference_use(),
+                    acceptable=True,
+                    nodes=[
+                        SubproblemAudit(
+                            key=one.key,
+                            acceptable=True,
+                            natural_proof_acceptable=True,
+                            reason="The child contract and supplied proof are valid.",
+                        )
+                        for one in subproblems
+                    ],
+                    required_changes=[],
+                )
+                made: dict[str, NodeRecord] = {}
+                ids = {one.key: f"root.{one.key}-a1" for one in subproblems}
+                audits = {one.key: one for one in audit.nodes}
+                for one in subproblems:
+                    child = runtime.store.ensure(
+                        ids[one.key],
+                        parent=parent.id,
+                        depth=1,
+                        title=one.title,
+                        statement=one.statement,
+                        lean_statement=one.lean_statement,
+                        lean_name=one.lean_name,
+                        depends_on=[ids[key] for key in one.depends_on],
+                    )
+                    runtime._install_parent_supplied_child_handoff(
+                        parent,
+                        child,
+                        one,
+                        audits[one.key],
+                        decomposition.reference_use,
+                        child.depends_on,
+                    )
+                    made[one.key] = child
+
+                feedback = runtime._publish_decomposition_workspace(
+                    parent, decomposition, audit, made
+                )
+                self.assertEqual(feedback, "")
+                self.assertTrue(parent.workspace_dispatch_branch)
+                self.assertTrue(parent.workspace_dispatch_commit)
+                dispatch_ref = (
+                    f"refs/heads/{parent.workspace_dispatch_branch}"
+                )
+                self.assertEqual(
+                    git(remote, "rev-parse", dispatch_ref),
+                    parent.workspace_dispatch_commit,
+                )
+                first = made["child_1"]
+                manifest_text = git(
+                    remote,
+                    "show",
+                    f"{dispatch_ref}:{first.workspace_manifest_path}",
+                )
+                manifest = GitWorkspaceDispatch.model_validate_json(manifest_text)
+                self.assertEqual(manifest.parent_id, parent.id)
+                self.assertEqual(len(manifest.children), 2)
+                self.assertEqual(first.proof_base_commit, parent.workspace_dispatch_commit)
+
+                handoff = json.loads((project / first.parent_handoff).read_text())
+                local_paths = [
+                    project / first.parent_handoff,
+                    project / handoff["plan_path"],
+                    project / handoff["natural_proof_path"],
+                    project / handoff["structured_proof_path"],
+                ]
+                for path in local_paths:
+                    path.unlink()
+                fetched, fetch_feedback = runtime._fetch_child_workspace(first)
+                self.assertTrue(fetched, fetch_feedback)
+                self.assertTrue(all(path.is_file() for path in local_paths))
+                self.assertEqual(
+                    git(project, "rev-parse", f"refs/heads/{first.proof_branch}"),
+                    first.workspace_handoff_commit,
+                )
+
+                worktree = runtime._node_worktree(first)
+                (worktree / "ChildOne.lean").write_text(
+                    "theorem child_theorem_1 : True := by trivial\n"
+                )
+                git(worktree, "add", "ChildOne.lean")
+                git(worktree, "commit", "-m", "feat: prove remote child")
+                candidate = runtime._git_head(worktree)
+                pushed, push_feedback = runtime._push_child_workspace_result(
+                    first, worktree, candidate
+                )
+                self.assertTrue(pushed, push_feedback)
+                self.assertEqual(first.workspace_result_commit, candidate)
+                self.assertEqual(
+                    git(remote, "rev-parse", f"refs/heads/{first.proof_branch}"),
+                    candidate,
+                )
+
+                git(project, "worktree", "remove", "--force", str(worktree))
+                git(project, "branch", "-D", first.proof_branch)
+                fetched, fetch_feedback = runtime._fetch_child_workspace(first)
+                self.assertTrue(fetched, fetch_feedback)
+                self.assertEqual(
+                    git(project, "rev-parse", f"refs/heads/{first.proof_branch}"),
+                    candidate,
+                )
+
+                natural_path = project / first.natural_proof
+                original_natural = natural_path.read_text()
+                natural_path.write_text("tampered proof\n")
+                fetched, fetch_feedback = runtime._fetch_child_workspace(first)
+                self.assertFalse(fetched)
+                self.assertIn("modified", fetch_feedback)
+                natural_path.write_text(original_natural)
+
+                attacker = root / "dispatch-rewriter"
+                git(root, "clone", str(remote), str(attacker))
+                git(attacker, "config", "user.name", "Foreign Writer")
+                git(attacker, "config", "user.email", "foreign@example.invalid")
+                git(
+                    attacker,
+                    "checkout",
+                    "-b",
+                    "rewrite-dispatch",
+                    f"origin/{parent.workspace_dispatch_branch}",
+                )
+                (attacker / "foreign.txt").write_text("unreviewed remote change\n")
+                git(attacker, "add", "foreign.txt")
+                git(attacker, "commit", "-m", "test: rewrite immutable dispatch")
+                git(
+                    attacker,
+                    "push",
+                    "origin",
+                    f"HEAD:refs/heads/{parent.workspace_dispatch_branch}",
+                )
+                fetched, fetch_feedback = runtime._fetch_child_workspace(first)
+                self.assertFalse(fetched)
+                self.assertIn("immutable", fetch_feedback)
+
+                git(
+                    project,
+                    "remote",
+                    "set-url",
+                    "--push",
+                    "workspace",
+                    "https://user:secret@github.com/example/problem.git",
+                )
+                with self.assertRaisesRegex(RuntimeError, "embed credentials"):
+                    runtime._github_workspace_remote()
             finally:
                 os.chdir(original)
 

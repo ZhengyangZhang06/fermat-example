@@ -150,3 +150,15 @@ Persist every root natural-language draft and its exact review feedback, plus ev
 parent-to-child proof handoff. If root proof review fails or the run resumes, revise the latest
 preserved root draft—retaining its sound steps—instead of starting from an empty response. Never
 revise an activated child's proof locally; a missing or altered handoff is a hard failure.
+
+When the controller enables a GitHub workspace remote, publish an accepted decomposition before
+activating any child. Use one immutable parent dispatch branch containing the reviewed split,
+audit, complete child proof bundles, problem/task context, reference manifest, and controller
+contract. Every child must fetch and verify that exact dispatch commit and all recorded SHA-256
+digests before using the inherited proof. Give each child a distinct result branch based on the
+dispatch commit; never let siblings push concurrently to one branch. Push only the exact candidate
+that has passed both the machine comparator and the independent reviewer comparator. Before a
+parent overlays an accepted child or integration resumes, fetch the recorded result branch and
+require its head to equal the accepted candidate commit. Treat rewritten dispatch heads,
+divergent result branches, missing bundles, embedded remote credentials, and local/remote handoff
+mismatches as hard failures rather than silently repairing or downgrading to local-only work.

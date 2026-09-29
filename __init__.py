@@ -159,6 +159,24 @@ class Config(BaseModel):
         min_length=1,
         description="text that must occur in successful comparator output",
     )
+    github_workspace_remote: str = Field(
+        default="",
+        description=(
+            "Git remote used for immutable parent dispatch branches and child result "
+            "branches; blank keeps the local-worktree-only behavior"
+        ),
+    )
+    github_workspace_branch_prefix: str = Field(
+        default="humanize-workspace",
+        min_length=1,
+        max_length=128,
+        description="Git branch namespace used for parent dispatch branches",
+    )
+    github_workspace_push_timeout: float = Field(
+        default=300,
+        ge=1,
+        description="seconds allowed for each GitHub fetch, branch query, or push",
+    )
     stop_on_child_failure: bool = Field(
         default=True,
         description="block a parent when any required subproblem exhausts its attempts",
@@ -200,6 +218,32 @@ class Config(BaseModel):
             "user",
         }:
             raise ValueError("must not repurpose a common system environment variable")
+        return normalized
+
+    @field_validator("github_workspace_remote")
+    @classmethod
+    def _git_remote_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", normalized
+        ):
+            raise ValueError("must be blank or one Git remote name")
+        return normalized
+
+    @field_validator("github_workspace_branch_prefix")
+    @classmethod
+    def _git_branch_prefix(cls, value: str) -> str:
+        normalized = value.strip().strip("/")
+        invalid = (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", normalized)
+            or ".." in normalized
+            or "//" in normalized
+            or "@{" in normalized
+            or normalized.endswith(".lock")
+            or any(part in {"", "."} for part in normalized.split("/"))
+        )
+        if invalid:
+            raise ValueError("must be a safe Git branch namespace")
         return normalized
 
     @field_validator("lean_target")

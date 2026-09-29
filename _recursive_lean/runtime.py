@@ -16,6 +16,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import fcntl
@@ -26,6 +27,8 @@ from .models import (
     Decomposition,
     DecompositionAudit,
     FetchedProblem,
+    GitWorkspaceChild,
+    GitWorkspaceDispatch,
     LeanAudit,
     NaturalAudit,
     NaturalProof,
@@ -266,6 +269,7 @@ class Runtime:
         self._graph_lock = threading.RLock()
         self._integration_lock = threading.Lock()
         self._worktree_lock = threading.Lock()
+        self._workspace_remote_lock = threading.Lock()
         self._revision_lock = threading.Lock()
         self._integration_futures_lock = threading.RLock()
         self._speculation_futures_lock = threading.RLock()
@@ -295,6 +299,8 @@ class Runtime:
         if not self.task:
             raise ValueError("recursive_lean_prover needs a mathematical problem")
         self._require_git()
+        if self._github_workspace_enabled():
+            self._github_workspace_remote()
         self._require_comparator()
         run_relative = str(self.run_root.relative_to(self.project))
         identity = {
@@ -886,6 +892,14 @@ class Runtime:
         feedback = node.message if node.status == "failed" else "None."
         inherited_natural: NaturalProof | None = None
         if node.parent is not None:
+            fetched, fetch_feedback = self._fetch_child_workspace(node)
+            if not fetched:
+                self.store.update(node.id, "failed", fetch_feedback)
+                return SolveResult(
+                    ok=False,
+                    node_id=node.id,
+                    feedback=fetch_feedback,
+                )
             # A child is deliberately not a miniature root run.  Its independently
             # reviewed proof and implementation scaffold are supplied by its parent.
             # Fail closed rather than silently falling back to child planning or prose
@@ -1701,6 +1715,21 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             if parent.children != retained_children:
                 parent.children = retained_children
                 self.store.render()
+        workspace_problem = self._publish_decomposition_workspace(
+            parent,
+            decomposition,
+            accepted_audit,
+            made,
+        )
+        if workspace_problem:
+            self.store.update(parent.id, "decomposing", workspace_problem)
+            return [
+                SolveResult(
+                    ok=False,
+                    node_id=parent.id,
+                    feedback=workspace_problem,
+                )
+            ]
         if self._speculation_enabled():
             self.store.update(
                 parent.id,
@@ -2206,6 +2235,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             raise RuntimeError(
                 "accepted checkpoint lacks its Git base or candidate commit"
             )
+        fetched, feedback = self._fetch_workspace_result(node)
+        if not fetched:
+            raise RuntimeError(feedback)
         recorded = Path(node.worktree) if node.worktree else None
         if recorded is not None and self._git_toplevel(recorded) == recorded:
             return recorded
@@ -2895,6 +2927,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 continue
             if not child.candidate_commit or not child.proof_base_commit:
                 continue
+            fetched, feedback = self._fetch_workspace_result(child)
+            if not fetched:
+                return False, feedback
             listed = subprocess.run(
                 [
                     "git",
@@ -3264,6 +3299,20 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         reference_problem = self._reference_use_problem(audit)
         if audit is None or not audit.passed or reference_problem:
             return self._reject_lean_audit(node, audit, reference_problem)
+        pushed, push_feedback = self._push_child_workspace_result(
+            node, worktree, after
+        )
+        if not pushed:
+            self.store.update(
+                node.id,
+                "lean-review",
+                "accepted child could not publish its reviewed result branch",
+            )
+            return SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback=push_feedback,
+            )
         self.store.update(
             node.id,
             "integrating",
@@ -3502,6 +3551,876 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         )
         return ",".join(fields)
 
+    def _github_workspace_enabled(self) -> bool:
+        """Whether this run must exchange node work through a Git remote."""
+        return bool(getattr(self.config, "github_workspace_remote", "").strip())
+
+    def _github_workspace_remote(self) -> str:
+        """Return a configured, credential-safe remote name or fail closed."""
+        remote = getattr(self.config, "github_workspace_remote", "").strip()
+        if not remote:
+            return ""
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", remote):
+            raise RuntimeError("GitHub workspace remote name is unsafe")
+        completed = subprocess.run(
+            ["git", "remote", "get-url", "--push", remote],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode or not completed.stdout.strip():
+            raise RuntimeError(f"GitHub workspace remote {remote!r} is unavailable")
+        url = completed.stdout.strip()
+        if "\n" in url or "\r" in url:
+            raise RuntimeError("GitHub workspace remote URL is malformed")
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", url):
+            parsed = urlsplit(url)
+            if parsed.username or parsed.password:
+                raise RuntimeError(
+                    "GitHub workspace remote must not embed credentials in its URL"
+                )
+            if parsed.scheme == "http":
+                raise RuntimeError("GitHub workspace remote must not use plaintext HTTP")
+        return remote
+
+    def _github_workspace_timeout(self) -> float:
+        return float(getattr(self.config, "github_workspace_push_timeout", 300))
+
+    def _workspace_git(
+        self,
+        arguments: list[str],
+        *,
+        cwd: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one bounded Git transport command without exposing remote URLs."""
+        try:
+            with self._workspace_remote_lock:
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=cwd or self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=self._github_workspace_timeout(),
+                )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                f"GitHub workspace Git command timed out: git {arguments[0]}"
+            ) from error
+
+    def _workspace_dispatch_branch(self, parent: NodeRecord) -> str:
+        prefix = getattr(
+            self.config,
+            "github_workspace_branch_prefix",
+            "humanize-workspace",
+        ).strip().strip("/")
+        branch = (
+            f"{prefix}/{slug(self.project.name)}/{slug(self.run_root.name)}/"
+            f"dispatch/{slug(parent.id)}"
+        )
+        checked = subprocess.run(
+            ["git", "check-ref-format", "--branch", branch],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if checked.returncode:
+            raise RuntimeError("generated GitHub dispatch branch name is invalid")
+        return branch
+
+    def _workspace_dispatch_root(self, parent: NodeRecord) -> Path:
+        return (
+            Path(".humanize-workspace")
+            / slug(self.run_root.name)
+            / slug(parent.id)
+        )
+
+    @staticmethod
+    def _workspace_digest(content: str) -> str:
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    def _required_workspace_text(self, path: Path, label: str) -> str:
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise RuntimeError(
+                f"GitHub workspace cannot read required {label}: {path}"
+            ) from error
+
+    def _workspace_payload(
+        self,
+        parent: NodeRecord,
+        decomposition: Decomposition,
+        audit: DecompositionAudit,
+        made: dict[str, NodeRecord],
+    ) -> tuple[Path, Path, dict[str, str], list[GitWorkspaceChild]]:
+        """Build the exact reviewed material committed to a parent dispatch branch."""
+        root = self._workspace_dispatch_root(parent)
+        manifest_path = root / "workspace.json"
+        files: dict[str, str] = {}
+
+        def include(relative: Path, content: str) -> None:
+            files[(root / relative).as_posix()] = content
+
+        include("task.md", f"# Recursive Lean task\n\n{self.task.strip()}\n")
+        include(
+            "problem.md",
+            self._required_workspace_text(self.problem_path, "fetched problem Markdown"),
+        )
+        include(
+            "problem.json",
+            self._required_workspace_text(
+                self.run_root / "problem.json", "fetched problem JSON"
+            ),
+        )
+        reference_manifest = (
+            self.reference_bundle.manifest
+            if self.reference_bundle is not None
+            else Path(self.store.reference_manifest)
+            if self.store.reference_manifest
+            else None
+        )
+        if reference_manifest is None:
+            raise RuntimeError("GitHub workspace lacks a reference snapshot manifest")
+        include(
+            "reference-manifest.json",
+            self._required_workspace_text(
+                reference_manifest, "reference snapshot manifest"
+            ),
+        )
+        include(
+            "decomposition.json",
+            decomposition.model_dump_json(indent=2) + "\n",
+        )
+        include(
+            "decomposition-audit.json",
+            audit.model_dump_json(indent=2) + "\n",
+        )
+        controller = {
+            "schema_version": 1,
+            "problem_id": self.problem_id,
+            "lean_target": getattr(self.config, "lean_target", ""),
+            "comparator_command": getattr(self.config, "comparator_command", ""),
+            "comparator_success": getattr(self.config, "comparator_success", ""),
+            "rlcr_rounds": getattr(self.config, "rlcr_rounds", None),
+            "max_depth": getattr(self.config, "max_depth", None),
+            "max_children": getattr(self.config, "max_children", None),
+        }
+        include(
+            "controller-contract.json",
+            json.dumps(controller, ensure_ascii=False, indent=2) + "\n",
+        )
+
+        entries: list[GitWorkspaceChild] = []
+        by_key = {one.key: one for one in decomposition.subproblems}
+        for key in self._topological(decomposition.subproblems):
+            child = made[key]
+            subproblem = by_key[key]
+            # An accepted theorem may be reused by Lean name under a different
+            # parent. It retains its original immutable workspace and result
+            # branch; this dispatch's decomposition/audit already records the
+            # reference, but there is no new child worker to provision.
+            if child.parent != parent.id and self._accepted_checkpoint(child):
+                continue
+            if not child.parent_handoff:
+                raise RuntimeError(f"child {child.id} lacks its frozen handoff")
+            handoff_path = self.project / child.parent_handoff
+            try:
+                handoff = ChildProofHandoff.model_validate_json(
+                    handoff_path.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError) as error:
+                raise RuntimeError(
+                    f"child {child.id} has an unreadable frozen handoff"
+                ) from error
+            bundle = root / "children" / slug(child.id)
+            local_files = {
+                "parent-child-handoff.json": handoff_path,
+                "parent-supplied-plan.md": self.project / handoff.plan_path,
+                "parent-supplied-natural-proof.md": (
+                    self.project / handoff.natural_proof_path
+                ),
+                "parent-supplied-natural-proof.json": (
+                    self.project / handoff.structured_proof_path
+                ),
+            }
+            for name, path in local_files.items():
+                files[(bundle / name).as_posix()] = self._required_workspace_text(
+                    path, f"{child.id} {name}"
+                )
+            result_branch = self._node_branch(child)
+            child_contract = {
+                "schema_version": 1,
+                "node_id": child.id,
+                "parent_id": child.parent,
+                "depth": child.depth,
+                "title": child.title,
+                "statement": child.statement,
+                "lean_statement": child.lean_statement,
+                "lean_name": child.lean_name,
+                "depends_on": child.depends_on,
+                "dependency_workspaces": [
+                    {
+                        "node_id": dependency,
+                        "result_branch": record.workspace_result_branch,
+                        "result_commit": (
+                            record.workspace_result_commit
+                            or record.candidate_commit
+                        ),
+                        "integrated_commit": record.integrated_commit,
+                    }
+                    for dependency in child.depends_on
+                    for record in [self.store.nodes[dependency]]
+                ],
+                "result_branch": result_branch,
+            }
+            files[(bundle / "node.json").as_posix()] = json.dumps(
+                child_contract, ensure_ascii=False, indent=2
+            ) + "\n"
+            entries.append(
+                GitWorkspaceChild(
+                    node_id=child.id,
+                    key=subproblem.key,
+                    result_branch=result_branch,
+                    bundle_path=bundle.as_posix(),
+                    handoff=handoff,
+                )
+            )
+        return root, manifest_path, files, entries
+
+    def _local_ref_head(self, ref: str) -> str:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--verify", ref],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return completed.stdout.strip() if completed.returncode == 0 else ""
+
+    def _remote_branch_head(self, remote: str, branch: str) -> str:
+        checked = subprocess.run(
+            ["git", "check-ref-format", "--branch", branch],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if checked.returncode:
+            raise RuntimeError("GitHub workspace branch name is unsafe")
+        completed = self._workspace_git(
+            ["ls-remote", "--heads", remote, f"refs/heads/{branch}"]
+        )
+        if completed.returncode:
+            raise RuntimeError(
+                f"could not query GitHub workspace branch {branch!r} on {remote!r}"
+            )
+        rows = [one.split() for one in completed.stdout.splitlines() if one.strip()]
+        if not rows:
+            return ""
+        if len(rows) != 1 or len(rows[0]) < 2:
+            raise RuntimeError("GitHub workspace branch query was ambiguous")
+        return rows[0][0]
+
+    def _fetch_workspace_branch(self, remote: str, branch: str) -> str:
+        expected = self._remote_branch_head(remote, branch)
+        if not expected:
+            return ""
+        fetched = self._workspace_git(
+            [
+                "fetch",
+                "--no-tags",
+                remote,
+                f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}",
+            ]
+        )
+        if fetched.returncode:
+            raise RuntimeError(
+                f"could not fetch GitHub workspace branch {branch!r} from {remote!r}"
+            )
+        actual = self._local_ref_head(f"refs/remotes/{remote}/{branch}")
+        if actual != expected:
+            raise RuntimeError("GitHub workspace branch changed during fetch")
+        return actual
+
+    def _git_blob(self, commit: str, path: str) -> str:
+        parsed = Path(path)
+        if (
+            not re.fullmatch(r"[0-9a-f]{40,64}", commit)
+            or not path
+            or parsed.is_absolute()
+            or ".." in parsed.parts
+            or "\x00" in path
+            or "\\" in path
+            or ":" in path
+        ):
+            raise RuntimeError("workspace Git object coordinates are unsafe")
+        shown = subprocess.run(
+            ["git", "show", f"{commit}:{path}"],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if shown.returncode:
+            raise RuntimeError(f"workspace commit lacks required file {path}")
+        return shown.stdout
+
+    def _load_workspace_dispatch(
+        self, commit: str, manifest_path: str
+    ) -> GitWorkspaceDispatch:
+        try:
+            dispatch = GitWorkspaceDispatch.model_validate_json(
+                self._git_blob(commit, manifest_path)
+            )
+        except ValueError as error:
+            raise RuntimeError("GitHub workspace manifest is invalid") from error
+        for path, digest in dispatch.files.items():
+            if self._workspace_digest(self._git_blob(commit, path)) != digest:
+                raise RuntimeError(
+                    f"GitHub workspace file failed its SHA-256 check: {path}"
+                )
+        parents = subprocess.run(
+            ["git", "rev-list", "--parents", "-n", "1", commit],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        ancestry = parents.stdout.split()
+        if parents.returncode or len(ancestry) != 2 or ancestry[1] != dispatch.source_commit:
+            raise RuntimeError(
+                "GitHub workspace dispatch must be one immutable commit over its source base"
+            )
+        changed = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--name-only",
+                dispatch.source_commit,
+                commit,
+            ],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        expected_paths = {*dispatch.files, manifest_path}
+        if changed.returncode or set(changed.stdout.splitlines()) != expected_paths:
+            raise RuntimeError(
+                "GitHub workspace dispatch contains files outside its signed manifest"
+            )
+        return dispatch
+
+    def _publish_workspace_branch(
+        self,
+        remote: str,
+        branch: str,
+        *,
+        root: Path,
+        manifest_path: Path,
+        files: dict[str, str],
+        entries: list[GitWorkspaceChild],
+        parent: NodeRecord,
+    ) -> tuple[str, GitWorkspaceDispatch]:
+        """Create or reuse one immutable remote dispatch branch."""
+        expected_hashes = {
+            path: self._workspace_digest(content) for path, content in files.items()
+        }
+
+        def validate(commit: str) -> GitWorkspaceDispatch:
+            dispatch = self._load_workspace_dispatch(
+                commit, manifest_path.as_posix()
+            )
+            if (
+                dispatch.run_id != self.run_root.name
+                or dispatch.parent_id != parent.id
+                or dispatch.dispatch_branch != branch
+                or dispatch.comparator_command
+                != getattr(self.config, "comparator_command", "")
+                or dispatch.comparator_success
+                != getattr(self.config, "comparator_success", "")
+                or dispatch.lean_target != getattr(self.config, "lean_target", "")
+                or dispatch.children != entries
+                or dispatch.files != expected_hashes
+            ):
+                raise RuntimeError(
+                    "existing GitHub dispatch branch disagrees with the reviewed decomposition"
+                )
+            for path, content in files.items():
+                if self._git_blob(commit, path) != content:
+                    raise RuntimeError(
+                        f"existing GitHub dispatch content differs at {path}"
+                    )
+            return dispatch
+
+        remote_head = self._fetch_workspace_branch(remote, branch)
+        if remote_head:
+            return remote_head, validate(remote_head)
+
+        local_ref = f"refs/heads/{branch}"
+        local_head = self._local_ref_head(local_ref)
+        if local_head:
+            dispatch = validate(local_head)
+        else:
+            source = self._git_head(self.project)
+            if not source:
+                raise RuntimeError("could not determine Git source for workspace dispatch")
+            scratch_parent = self.project.parent / ".recursive-lean-dispatch-worktrees"
+            scratch_parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                prefix=f"{slug(parent.id)}-", dir=scratch_parent
+            ) as temporary:
+                checkout = Path(temporary) / self.project.name
+                with self._worktree_lock:
+                    added = subprocess.run(
+                        [
+                            "git",
+                            "worktree",
+                            "add",
+                            "-b",
+                            branch,
+                            str(checkout),
+                            source,
+                        ],
+                        cwd=self.project,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                if added.returncode:
+                    raise RuntimeError("could not create GitHub dispatch worktree")
+                try:
+                    for path, content in files.items():
+                        atomic_text(checkout / path, content)
+                    dispatch = GitWorkspaceDispatch(
+                        run_id=self.run_root.name,
+                        parent_id=parent.id,
+                        dispatch_branch=branch,
+                        source_commit=source,
+                        comparator_command=getattr(
+                            self.config, "comparator_command", ""
+                        ),
+                        comparator_success=getattr(
+                            self.config, "comparator_success", ""
+                        ),
+                        lean_target=getattr(self.config, "lean_target", ""),
+                        children=entries,
+                        files=expected_hashes,
+                    )
+                    atomic_text(
+                        checkout / manifest_path,
+                        dispatch.model_dump_json(indent=2) + "\n",
+                    )
+                    staged = subprocess.run(
+                        ["git", "add", "-f", "--", root.as_posix()],
+                        cwd=checkout,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if staged.returncode:
+                        raise RuntimeError("could not stage GitHub dispatch bundle")
+                    committed = subprocess.run(
+                        [
+                            *INTEGRATION_GIT,
+                            "commit",
+                            "-m",
+                            f"chore(handoff): dispatch {slug(parent.id)} children",
+                        ],
+                        cwd=checkout,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if committed.returncode:
+                        raise RuntimeError("could not commit GitHub dispatch bundle")
+                    local_head = self._git_head(checkout)
+                finally:
+                    with self._worktree_lock:
+                        removed = subprocess.run(
+                            ["git", "worktree", "remove", "--force", str(checkout)],
+                            cwd=self.project,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                    if removed.returncode:
+                        raise RuntimeError("could not remove GitHub dispatch worktree")
+            dispatch = validate(local_head)
+
+        pushed = self._workspace_git(
+            [
+                "push",
+                "--set-upstream",
+                remote,
+                f"refs/heads/{branch}:refs/heads/{branch}",
+            ]
+        )
+        if pushed.returncode:
+            raced = self._fetch_workspace_branch(remote, branch)
+            if not raced:
+                raise RuntimeError(
+                    f"could not push GitHub workspace branch {branch!r}"
+                )
+            return raced, validate(raced)
+        remote_head = self._fetch_workspace_branch(remote, branch)
+        if remote_head != local_head:
+            raise RuntimeError("GitHub dispatch branch did not retain the pushed commit")
+        return local_head, dispatch
+
+    def _publish_decomposition_workspace(
+        self,
+        parent: NodeRecord,
+        decomposition: Decomposition,
+        audit: DecompositionAudit,
+        made: dict[str, NodeRecord],
+    ) -> str:
+        """Publish a reviewed parent split before any child worker is activated."""
+        if not self._github_workspace_enabled() or not decomposition.should_split:
+            return ""
+        try:
+            remote = self._github_workspace_remote()
+            branch = self._workspace_dispatch_branch(parent)
+            root, manifest_path, files, entries = self._workspace_payload(
+                parent, decomposition, audit, made
+            )
+            commit, dispatch = self._publish_workspace_branch(
+                remote,
+                branch,
+                root=root,
+                manifest_path=manifest_path,
+                files=files,
+                entries=entries,
+                parent=parent,
+            )
+            with self._graph_lock:
+                parent.workspace_dispatch_branch = branch
+                parent.workspace_dispatch_commit = commit
+                by_id = {one.node_id: one for one in dispatch.children}
+                for child in made.values():
+                    if child.id not in by_id:
+                        continue
+                    entry = by_id[child.id]
+                    child.workspace_remote = remote
+                    child.workspace_manifest_path = manifest_path.as_posix()
+                    child.workspace_bundle_path = entry.bundle_path
+                    child.workspace_handoff_branch = branch
+                    child.workspace_handoff_commit = commit
+                    child.workspace_result_branch = entry.result_branch
+                    child.proof_branch = entry.result_branch
+                    child.proof_base_commit = commit
+                self.store.render()
+            return ""
+        except (OSError, RuntimeError, ValueError) as error:
+            return f"could not publish reviewed child handoffs to GitHub: {error}"
+
+    def _ensure_local_workspace_branch(
+        self, branch: str, handoff_commit: str
+    ) -> None:
+        local_ref = f"refs/heads/{branch}"
+        head = self._local_ref_head(local_ref)
+        if not head:
+            with self._worktree_lock:
+                created = subprocess.run(
+                    ["git", "branch", branch, handoff_commit],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            if created.returncode:
+                raise RuntimeError("could not create local child result branch")
+            return
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", handoff_commit, head],
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if ancestor.returncode:
+            raise RuntimeError(
+                "local child result branch does not descend from its dispatch commit"
+            )
+
+    def _fetch_child_workspace(self, node: NodeRecord) -> tuple[bool, str]:
+        """Fetch, verify, and locally rehydrate one child's remote handoff."""
+        if node.parent is None:
+            return True, "root has no parent workspace"
+        configured = getattr(self.config, "github_workspace_remote", "").strip()
+        if not configured and not node.workspace_remote:
+            return True, "GitHub workspace disabled"
+        try:
+            remote = self._github_workspace_remote()
+            if not remote or node.workspace_remote != remote:
+                raise RuntimeError(
+                    "child workspace remote does not match the configured GitHub remote"
+                )
+            required = (
+                node.workspace_manifest_path,
+                node.workspace_bundle_path,
+                node.workspace_handoff_branch,
+                node.workspace_handoff_commit,
+                node.workspace_result_branch,
+            )
+            if any(not one for one in required):
+                raise RuntimeError("child lacks its remote workspace coordinates")
+            remote_head = self._fetch_workspace_branch(
+                remote, node.workspace_handoff_branch
+            )
+            if remote_head != node.workspace_handoff_commit:
+                raise RuntimeError("immutable parent dispatch branch changed on GitHub")
+            dispatch = self._load_workspace_dispatch(
+                remote_head, node.workspace_manifest_path
+            )
+            if (
+                dispatch.run_id != self.run_root.name
+                or dispatch.parent_id != node.parent
+                or dispatch.dispatch_branch != node.workspace_handoff_branch
+                or dispatch.comparator_command
+                != getattr(self.config, "comparator_command", "")
+                or dispatch.comparator_success
+                != getattr(self.config, "comparator_success", "")
+                or dispatch.lean_target != getattr(self.config, "lean_target", "")
+            ):
+                raise RuntimeError("workspace manifest names the wrong run or contract")
+            entries = [one for one in dispatch.children if one.node_id == node.id]
+            if len(entries) != 1:
+                raise RuntimeError("workspace manifest does not select exactly one child")
+            entry = entries[0]
+            expected_handoff_path = str(
+                Path(entry.handoff.plan_path).parent / "parent-child-handoff.json"
+            )
+            if (
+                entry.bundle_path != node.workspace_bundle_path
+                or entry.result_branch != node.workspace_result_branch
+                or entry.handoff.child_id != node.id
+                or entry.handoff.parent_id != node.parent
+                or entry.handoff.subproblem.title != node.title
+                or entry.handoff.subproblem.statement != node.statement
+                or entry.handoff.subproblem.lean_statement != node.lean_statement
+                or entry.handoff.subproblem.lean_name != node.lean_name
+                or entry.handoff.resolved_dependencies != node.depends_on
+                or entry.handoff.plan_path != node.plan
+                or entry.handoff.natural_proof_path != node.natural_proof
+                or node.parent_handoff != expected_handoff_path
+            ):
+                raise RuntimeError("workspace child contract disagrees with the DAG")
+            remote_files = {
+                "parent-child-handoff.json": self.project / node.parent_handoff,
+                "parent-supplied-plan.md": self.project / entry.handoff.plan_path,
+                "parent-supplied-natural-proof.md": (
+                    self.project / entry.handoff.natural_proof_path
+                ),
+                "parent-supplied-natural-proof.json": (
+                    self.project / entry.handoff.structured_proof_path
+                ),
+            }
+            for name, target in remote_files.items():
+                source = f"{entry.bundle_path}/{name}"
+                content = self._git_blob(remote_head, source)
+                if source not in dispatch.files:
+                    raise RuntimeError(f"workspace manifest omits {source}")
+                if target.exists():
+                    if target.read_text(encoding="utf-8") != content:
+                        raise RuntimeError(
+                            f"local child handoff was modified after GitHub dispatch: {target}"
+                        )
+                else:
+                    atomic_text(target, content)
+            self._ensure_local_workspace_branch(
+                node.workspace_result_branch, node.workspace_handoff_commit
+            )
+            if node.workspace_result_commit:
+                result_head = self._fetch_workspace_branch(
+                    remote, node.workspace_result_branch
+                )
+                if result_head != node.workspace_result_commit:
+                    raise RuntimeError(
+                        "recorded child result commit changed on GitHub"
+                    )
+                local_head = self._local_ref_head(
+                    f"refs/heads/{node.workspace_result_branch}"
+                )
+                if local_head != result_head:
+                    recorded = Path(node.worktree) if node.worktree else None
+                    if (
+                        recorded is not None
+                        and self._git_toplevel(recorded) == recorded
+                    ):
+                        if self._git_head(recorded) != result_head:
+                            raise RuntimeError(
+                                "local child worktree differs from its pushed result"
+                            )
+                    else:
+                        with self._worktree_lock:
+                            subprocess.run(
+                                ["git", "worktree", "prune"],
+                                cwd=self.project,
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                            )
+                            restored = subprocess.run(
+                                [
+                                    "git",
+                                    "branch",
+                                    "-f",
+                                    node.workspace_result_branch,
+                                    result_head,
+                                ],
+                                cwd=self.project,
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                            )
+                        if restored.returncode:
+                            raise RuntimeError(
+                                "could not restore local branch from pushed child result"
+                            )
+            return True, "fetched and verified parent dispatch branch"
+        except (OSError, RuntimeError, ValueError) as error:
+            return False, f"could not fetch child GitHub workspace: {error}"
+
+    def _push_child_workspace_result(
+        self, node: NodeRecord, worktree: Path, candidate: str
+    ) -> tuple[bool, str]:
+        """Push one fully reviewed child commit to its unique result branch."""
+        if node.parent is None:
+            return True, "root result remains on the canonical problem branch"
+        if not self._github_workspace_enabled() and not node.workspace_remote:
+            return True, "GitHub workspace disabled"
+        try:
+            remote = self._github_workspace_remote()
+            if remote != node.workspace_remote:
+                raise RuntimeError("child result remote differs from its dispatch remote")
+            if not node.workspace_result_branch or not node.workspace_handoff_commit:
+                raise RuntimeError("child result lacks remote branch coordinates")
+            if self._git_head(worktree) != candidate:
+                raise RuntimeError("child worktree moved after independent review")
+            ancestor = subprocess.run(
+                [
+                    "git",
+                    "merge-base",
+                    "--is-ancestor",
+                    node.workspace_handoff_commit,
+                    candidate,
+                ],
+                cwd=worktree,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if ancestor.returncode:
+                raise RuntimeError("child result does not descend from its dispatch commit")
+            local_head = self._local_ref_head(
+                f"refs/heads/{node.workspace_result_branch}"
+            )
+            if local_head != candidate:
+                raise RuntimeError("child result branch does not name the reviewed commit")
+            remote_head = self._fetch_workspace_branch(
+                remote, node.workspace_result_branch
+            )
+            if remote_head and remote_head != candidate:
+                fast_forward = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", remote_head, candidate],
+                    cwd=self.project,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if fast_forward.returncode:
+                    raise RuntimeError(
+                        "GitHub child result branch has a divergent writer"
+                    )
+            if remote_head != candidate:
+                pushed = self._workspace_git(
+                    [
+                        "push",
+                        remote,
+                        (
+                            f"refs/heads/{node.workspace_result_branch}:"
+                            f"refs/heads/{node.workspace_result_branch}"
+                        ),
+                    ],
+                    cwd=worktree,
+                )
+                if pushed.returncode:
+                    raise RuntimeError("could not push reviewed child result to GitHub")
+            if self._fetch_workspace_branch(remote, node.workspace_result_branch) != candidate:
+                raise RuntimeError("GitHub child result branch has the wrong commit")
+            node.workspace_result_commit = candidate
+            self.store.render()
+            return True, "reviewed child result pushed to GitHub"
+        except (OSError, RuntimeError, ValueError) as error:
+            return False, f"could not publish child GitHub result: {error}"
+
+    def _fetch_workspace_result(self, node: NodeRecord) -> tuple[bool, str]:
+        """Fetch an accepted child's result commit before reuse or integration."""
+        if not node.workspace_remote:
+            return True, "accepted checkpoint is local-only"
+        try:
+            remote = self._github_workspace_remote()
+            if remote != node.workspace_remote:
+                raise RuntimeError("accepted child workspace remote changed")
+            expected = node.workspace_result_commit or node.candidate_commit
+            if not expected or expected != node.candidate_commit:
+                raise RuntimeError("accepted child lacks its pushed result checkpoint")
+            actual = self._fetch_workspace_branch(
+                remote, node.workspace_result_branch
+            )
+            if actual != expected:
+                raise RuntimeError("accepted child result branch changed on GitHub")
+            local = self._local_ref_head(
+                f"refs/heads/{node.workspace_result_branch}"
+            )
+            if not local:
+                self._ensure_local_workspace_branch(
+                    node.workspace_result_branch, node.workspace_handoff_commit
+                )
+                local = self._local_ref_head(
+                    f"refs/heads/{node.workspace_result_branch}"
+                )
+            if local != expected:
+                recorded = Path(node.worktree) if node.worktree else None
+                if recorded is not None and self._git_toplevel(recorded) == recorded:
+                    if self._git_head(recorded) != expected:
+                        raise RuntimeError(
+                            "accepted child worktree differs from its GitHub result"
+                        )
+                else:
+                    with self._worktree_lock:
+                        subprocess.run(
+                            ["git", "worktree", "prune"],
+                            cwd=self.project,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        moved = subprocess.run(
+                            [
+                                "git",
+                                "branch",
+                                "-f",
+                                node.workspace_result_branch,
+                                expected,
+                            ],
+                            cwd=self.project,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                    if moved.returncode:
+                        raise RuntimeError(
+                            "could not restore local child branch from GitHub result"
+                        )
+            return True, "fetched reviewed child result from GitHub"
+        except (OSError, RuntimeError, ValueError) as error:
+            return False, f"could not fetch accepted child GitHub result: {error}"
+
     def _node_worktree(self, node: NodeRecord) -> Path:
         """Create or reuse a durable Git branch and worktree for one node attempt."""
         recorded = Path(node.worktree) if node.worktree else None
@@ -3587,7 +4506,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                         "-b",
                         branch,
                         str(path),
-                        "HEAD",
+                        node.workspace_handoff_commit or "HEAD",
                     ]
                 )
                 completed = subprocess.run(
