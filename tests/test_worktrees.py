@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -2148,6 +2149,61 @@ class WorktreeTests(unittest.TestCase):
                 self.assertTrue(all(result.ok for result in results))
                 promote.assert_called_once_with(accepted)
                 self.assertEqual(started, ["root.dependent-a1"])
+            finally:
+                os.chdir(original)
+
+    def test_recreates_reboot_lost_accepted_candidate_worktree(self) -> None:
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "accepted_recovery_problem"
+            project.mkdir()
+            git(project, "init", "-b", "main")
+            git(project, "config", "user.name", "Flow Test")
+            git(project, "config", "user.email", "flow-test@example.invalid")
+            (project / ".gitignore").write_text(".humanize/\n.lake/\n")
+            (project / "Submission.lean").write_text(
+                "namespace Submission\nend Submission\n"
+            )
+            git(project, "add", ".gitignore", "Submission.lean")
+            git(project, "commit", "-m", "test: initialize recovery fixture")
+            try:
+                os.chdir(project)
+                config = SimpleNamespace(
+                    artifact_dir=".humanize/recursive-lean-prover",
+                    wiki_dir=".humanize/math-wiki",
+                    max_parallel_children=4,
+                )
+                runtime = Runtime(None, "accepted recovery fixture", config, {})
+                node = runtime.store.ensure(
+                    "root.child-a1",
+                    parent="root",
+                    depth=1,
+                    title="Accepted child",
+                    statement="Accepted theorem",
+                    lean_name="accepted_child",
+                )
+                node.attempts = 1
+                worktree = runtime._node_worktree(node)
+                base = node.proof_base_commit
+                (worktree / "Accepted.lean").write_text(
+                    "theorem accepted_child : True := by trivial\n"
+                )
+                git(worktree, "add", "Accepted.lean")
+                git(worktree, "commit", "-m", "feat: accepted candidate")
+                candidate = runtime._git_head(worktree)
+                node.status = "integrating"
+                node.candidate_commit = candidate
+
+                shutil.rmtree(worktree)
+                self.assertFalse(worktree.exists())
+
+                restored = runtime._accepted_candidate_worktree(node)
+
+                self.assertEqual(restored, worktree)
+                self.assertEqual(runtime._git_toplevel(restored), restored)
+                self.assertEqual(runtime._git_head(restored), candidate)
+                self.assertEqual(node.proof_base_commit, base)
+                self.assertEqual(node.candidate_commit, candidate)
             finally:
                 os.chdir(original)
 

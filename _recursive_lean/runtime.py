@@ -1844,19 +1844,16 @@ class Runtime:
                 node_id=node.id,
                 feedback="accepted checkpoint has no durable reviewer theorem record",
             )
-        worktree = Path(node.worktree)
-        if not worktree.is_dir():
-            return SolveResult(
-                ok=False,
-                node_id=node.id,
-                feedback=f"accepted proof worktree is unavailable: {worktree}",
-            )
         if not node.proof_base_commit or not node.candidate_commit:
             return SolveResult(
                 ok=False,
                 node_id=node.id,
                 feedback="accepted checkpoint lacks its Git base or candidate commit",
             )
+        try:
+            worktree = self._accepted_candidate_worktree(node)
+        except RuntimeError as error:
+            return SolveResult(ok=False, node_id=node.id, feedback=str(error))
         return self._complete_accepted_integration(
             node,
             worktree,
@@ -1868,11 +1865,11 @@ class Runtime:
     def _submit_resumed_integration(self, node: NodeRecord) -> Any:
         """Ensure one retained accepted checkpoint has one background promotion."""
         theorems = self._checkpoint_theorems(node)
-        worktree = Path(node.worktree)
         with self._integration_futures_lock:
             existing = self._integration_futures.get(node.id)
             if existing is not None:
                 return existing
+            worktree = self._accepted_candidate_worktree(node)
             future = self._integration_executor.submit(
                 self._complete_accepted_integration,
                 node,
@@ -1883,6 +1880,37 @@ class Runtime:
             )
             self._integration_futures[node.id] = future
             return future
+
+    def _accepted_candidate_worktree(self, node: NodeRecord) -> Path:
+        """Restore a reboot-lost accepted proof checkout without changing its history.
+
+        Accepted candidates commonly live below ``/tmp``.  The DAG, proof branch, base
+        commit, and reviewed candidate commit are durable, but a host reboot removes the
+        checkout and leaves prunable Git worktree metadata behind.  Recreate that checkout
+        from its retained proof branch while preserving the original comparison range.
+        """
+        before = node.proof_base_commit
+        after = node.candidate_commit
+        if not before or not after:
+            raise RuntimeError(
+                "accepted checkpoint lacks its Git base or candidate commit"
+            )
+        recorded = Path(node.worktree) if node.worktree else None
+        if recorded is not None and self._git_toplevel(recorded) == recorded:
+            return recorded
+        worktree = self._node_worktree(node)
+        # ``_node_worktree`` records the newly checked-out HEAD as a fresh proof base.
+        # For an already reviewed candidate that HEAD must instead be the retained
+        # candidate, and the original base remains the lower end of the reviewed range.
+        node.proof_base_commit = before
+        node.candidate_commit = after
+        actual = self._git_head(worktree)
+        if actual != after:
+            raise RuntimeError(
+                "restored accepted proof worktree has the wrong HEAD: "
+                f"expected {after}, got {actual}"
+            )
+        return worktree
 
     def _submit_accepted_integration(
         self,
