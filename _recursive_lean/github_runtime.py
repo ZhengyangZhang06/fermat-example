@@ -1,0 +1,521 @@
+"""Issue/PR lifecycle layered on the reviewed GitHub node-workspace workflow."""
+
+from __future__ import annotations
+
+import fcntl
+import hashlib
+import json
+import os
+import subprocess
+import tempfile
+import threading
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+from .github import GitHubClient, PublicationError, repository_from_url
+from .models import Decomposition, LeanAudit, NaturalProof, NodeRecord, SolveResult
+from .runtime import Runtime
+from .store import atomic_text, slug
+
+
+class GitHubTheoremRuntime(Runtime):
+    """Publish every recursive theorem without changing the existing proof gates."""
+
+    def __init__(self, agents: Any, task: str, config: Any, state: Any) -> None:
+        super().__init__(agents, task, config, state)
+        self.github = GitHubClient(
+            config.github_repository, self.project, self._github_workspace_timeout()
+        )
+        self._publication_lock = threading.RLock()
+        self._publication_abort: PublicationError | None = None
+        self.publication_context: dict[str, str] = {}
+
+    def _check_workflow_health(self) -> None:
+        if self._publication_abort is not None:
+            raise self._publication_abort
+
+    @contextmanager
+    def _publication_guard(self):
+        self._check_workflow_health()
+        try:
+            yield
+        except (OSError, RuntimeError, ValueError) as error:
+            failure = (
+                error
+                if isinstance(error, PublicationError)
+                else PublicationError(str(error))
+            )
+            self._publication_abort = failure
+            raise failure
+
+    def execute(self) -> None:
+        # The same run cannot race two issue/PR creators. Distinct runs retain their
+        # own identities and branches and can still run concurrently.
+        with (self.run_root / "github-publication.lock").open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise PublicationError(
+                    "this GitHub proof run already has a publisher"
+                ) from error
+            try:
+                self._prepare_publication()
+                self._reconcile_publications()
+                super().execute()
+                self._wait_for_integrations()
+                self._reconcile_publications()
+                root = self.store.nodes.get("root")
+                if root and root.status == "proved":
+                    print(
+                        f"Verified root solution PR (not automatically merged): {root.github_pr_url}"
+                    )
+            except PublicationError as error:
+                self.state.update(
+                    run_dir=str(self.run_root.relative_to(self.project)),
+                    task_digest=self._task_digest(),
+                    last_failure=str(error),
+                )
+                raise
+
+    def _git(self, *args: str, input: str | None = None, env: Any = None) -> str:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=self.project,
+                input=input,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self._github_workspace_timeout(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise PublicationError(
+                f"Git publication operation {args[0]} failed"
+            ) from error
+        if result.returncode:
+            raise PublicationError(f"Git publication operation {args[0]} failed")
+        return result.stdout.strip()
+
+    def _prepare_publication(self) -> None:
+        self._require_git()
+        remote = self._github_workspace_remote()
+        # Fetch and push must address the same repository as the API operations.
+        for args in (
+            ("remote", "get-url", remote),
+            ("remote", "get-url", "--push", remote),
+        ):
+            repository = repository_from_url(self._git(*args))
+            if repository.casefold() != self.github.repository.casefold():
+                raise PublicationError(
+                    "Git remote and configured GitHub repository differ"
+                )
+        self.github.request("GET", "")  # Verify API access before expensive proof work.
+        context_path = self.run_root / "github-workflow.json"
+        identity = {
+            "repository": self.github.repository,
+            "remote": remote,
+            "base_branch": self.config.github_base_branch,
+            "root_lean_name": self.config.github_root_lean_name,
+            "root_lean_statement": self.config.github_root_lean_statement,
+            "contract_file": self.config.github_contract_file,
+            "branch_prefix": self.config.github_workspace_branch_prefix,
+            "comparator_command": self.config.comparator_command,
+            "comparator_success": self.config.comparator_success,
+            "lean_target": self.config.lean_target,
+        }
+        if context_path.exists():
+            held = json.loads(context_path.read_text(encoding="utf-8"))
+            if any(held.get(key) != value for key, value in identity.items()):
+                raise PublicationError(
+                    "GitHub workflow identity/contract changed on resume"
+                )
+            self.publication_context = held
+            return
+        if self.store.nodes:
+            raise PublicationError(
+                "start a fresh run; existing DAG has no frozen GitHub contract"
+            )
+        base = self._fetch_workspace_branch(remote, self.config.github_base_branch)
+        if not base:
+            raise PublicationError("configured PR base branch does not exist on GitHub")
+        source = self._git_head(self.project)
+        self._git("merge-base", "--is-ancestor", base, source)
+        contract = self._git("show", f"{source}:{self.config.github_contract_file}")
+        self.publication_context = {
+            **identity,
+            "base_commit": base,
+            "source_commit": source,
+            "contract": contract,
+            "namespace": (
+                f"{self.config.github_workspace_branch_prefix}/"
+                f"{slug(self.project.name)}/{slug(self.run_root.name)}/theorems"
+            ),
+        }
+        atomic_text(context_path, json.dumps(self.publication_context, indent=2) + "\n")
+
+    def _root_lean_name(self) -> str:
+        return self.config.github_root_lean_name
+
+    @staticmethod
+    def _declaration_name(node: NodeRecord) -> str:
+        return (
+            f"Submission.{node.lean_name}"
+            if node.parent is not None
+            else node.lean_name
+        )
+
+    @staticmethod
+    def _node_slug(node: NodeRecord) -> str:
+        return f"{slug(node.id)}-{hashlib.sha256(node.id.encode()).hexdigest()[:10]}"
+
+    def _marker(self, node: NodeRecord, kind: str) -> str:
+        material = f"{self.publication_context['namespace']}\0{node.id}\0{kind}"
+        return (
+            f"<!-- math-lean-flow:{hashlib.sha256(material.encode()).hexdigest()} -->"
+        )
+
+    def _proof(self, node: NodeRecord) -> str:
+        if not node.natural_proof:
+            raise PublicationError(f"{node.id} has no reviewed natural-language proof")
+        return self._required_workspace_text(
+            self.project / node.natural_proof, "natural proof"
+        )
+
+    def _node_links(self, ids: list[str]) -> str:
+        return (
+            ", ".join(
+                self.store.nodes[one].github_issue_url
+                or f"`{one}` (publication pending)"
+                for one in ids
+            )
+            or "None"
+        )
+
+    def _issue_body(self, node: NodeRecord) -> str:
+        statement = node.lean_statement or self.config.github_root_lean_statement
+        return (
+            f"## Theorem `{self._declaration_name(node)}`\n\n{node.statement}\n\n"
+            f"Node: `{node.id}`\n\n"
+            f"Root: {self._node_links(['root'])}\n\n"
+            f"Parent: {self._node_links([node.parent]) if node.parent else 'None (root)'}\n\n"
+            f"Prerequisites: {self._node_links(node.depends_on)}\n\n"
+            f"Decomposition children: {self._node_links(node.children)}\n\n"
+            f"## Lean problem\n\nDeclaration: `{self._declaration_name(node)}`\n\n"
+            f"```lean\n{statement}\n```\n\n"
+            f"### Frozen project context\n\n"
+            f"`{self.config.github_contract_file}` at "
+            f"`{self.publication_context['source_commit']}` supplies the original imports, "
+            f"definitions and root contract. Child hypotheses are stated above; "
+            f"prerequisite declarations are linked in their issues.\n\n"
+            f"```lean\n{self.publication_context['contract']}\n```\n\n"
+            f"## Natural-language proof\n\n"
+            f"Reviewed mathematical argument; formal verification state: `{node.status}`.\n\n"
+            f"{self._proof(node)}\n\n"
+            f"## Acceptance\n\n"
+            f"The exact contract must pass the machine comparator and an independent "
+            f"reviewer's comparator rerun, without changed assumptions or proof holes. "
+            f"Local integration must pass before publication. Every decomposition child "
+            f"has its own issue and verified solution PR.\n\n"
+            f"Solution PR: {node.github_pr_url or 'Pending'}\n\n"
+            f"Remote merge status is recorded by GitHub; local `proved` does not mean merged.\n"
+        )
+
+    def _sync_issues(self, nodes: list[NodeRecord]) -> None:
+        with self._publication_guard(), self._publication_lock:
+            self._check_workflow_health()
+            # First create all identities, then fill in complete sibling/parent links.
+            for _ in range(2):
+                for node in nodes:
+                    if not node.lean_statement and node.parent is None:
+                        node.lean_statement = self.config.github_root_lean_statement
+                    result = self.github.issue(
+                        self._marker(node, "issue"),
+                        f"[Theorem {node.id}] {node.title}"[:240],
+                        self._issue_body(node),
+                    )
+                    node.github_issue_url = result["html_url"]
+                    self.store.render()
+
+    def _decompose(self, node: NodeRecord, proof: NaturalProof) -> Decomposition | None:
+        self._sync_issues([node])
+        return super()._decompose(node, proof)
+
+    def _publish_decomposition_workspace(self, parent: NodeRecord, *args: Any) -> str:
+        # This hook is called after the reviewed handoffs are frozen and before any
+        # child is activated. It applies equally to children and grandchildren.
+        self._sync_issues([parent, *[self.store.nodes[one] for one in parent.children]])
+        return super()._publish_decomposition_workspace(parent, *args)
+
+    def _theorem_publication_instructions(self, node: NodeRecord) -> str:
+        return (
+            f"\n\n## One theorem per solution PR\n\n"
+            f"Implement only the tracked declaration `{self._declaration_name(node)}`. "
+            "New named helper theorems belong in separate decomposition nodes with their "
+            "own issues and PRs. Use existing accepted dependency declarations or local "
+            "proof steps; do not silently add untracked named helper theorems. "
+            "The reviewer must catalogue only this node's theorem in `theorems`; "
+            "previously accepted child/dependency declarations are already tracked. "
+            "Reject additional new named theorems without their own tracked dependency "
+            "nodes, recording the reason in `issues`.\n"
+        )
+
+    def _theorem_publication_problem(
+        self, node: NodeRecord, audit: LeanAudit | None
+    ) -> str:
+        if audit is not None and [one.name for one in audit.theorems] != [
+            self._declaration_name(node)
+        ]:
+            return "one solution PR must prove exactly its tracked theorem; decompose named helpers"
+        return ""
+
+    def _complete_accepted_integration(
+        self, node: NodeRecord, *args: Any, **kwargs: Any
+    ) -> SolveResult:
+        result = super()._complete_accepted_integration(node, *args, **kwargs)
+        if result.ok:
+            self._publish_solution(node)
+        return result
+
+    def _reconcile_publications(self) -> None:
+        for node in sorted(
+            self.store.nodes.values(), key=lambda one: (-one.depth, one.id)
+        ):
+            if node.status == "proved":
+                self._publish_solution(node)
+
+    def _problem_nodes(self) -> list[NodeRecord]:
+        """Follow current dependency edges, excluding obsolete decompositions."""
+        found: dict[str, NodeRecord] = {}
+        active: set[str] = set()
+
+        def visit(node_id: str) -> None:
+            if node_id in active:
+                raise PublicationError(
+                    "the active theorem dependencies contain a cycle"
+                )
+            if node_id in found:
+                return
+            if node_id not in self.store.nodes:
+                raise PublicationError(
+                    "the active theorem dependencies contain a missing node"
+                )
+            active.add(node_id)
+            record = self.store.nodes[node_id]
+            for dependency in record.children + record.depends_on:
+                visit(dependency)
+            active.remove(node_id)
+            found[node_id] = record
+
+        visit("root")
+        return sorted(found.values(), key=lambda one: one.id)
+
+    def _publish_ref(self, branch: str, commit: str) -> None:
+        remote = self.config.github_workspace_remote
+        existing = self._fetch_workspace_branch(remote, branch)
+        if existing and existing != commit:
+            raise PublicationError(
+                "a theorem publication branch moved; refusing to overwrite it"
+            )
+        if not existing:
+            pushed = self._workspace_git(
+                ["push", remote, f"{commit}:refs/heads/{branch}"]
+            )
+            if pushed.returncode:
+                raise PublicationError(
+                    "could not push theorem publication branch; resume after restoring access"
+                )
+        if self._fetch_workspace_branch(remote, branch) != commit:
+            raise PublicationError("the published theorem branch has the wrong commit")
+
+    def _solution_commit(self, code_commit: str, documents: dict[str, str]) -> str:
+        # A temporary Git index adds documentation to an exact verified source tree.
+        # No proof checkout, candidate commit or canonical branch is modified.
+        with tempfile.TemporaryDirectory(prefix="theorem-publication-") as directory:
+            environment = {
+                **os.environ,
+                "GIT_INDEX_FILE": str(Path(directory) / "index"),
+                "GIT_AUTHOR_NAME": "Humanize Theorem Publisher",
+                "GIT_AUTHOR_EMAIL": "humanize-theorems@example.invalid",
+                "GIT_COMMITTER_NAME": "Humanize Theorem Publisher",
+                "GIT_COMMITTER_EMAIL": "humanize-theorems@example.invalid",
+            }
+            self._git("read-tree", code_commit, env=environment)
+            for path, content in documents.items():
+                blob = self._git("hash-object", "-w", "--stdin", input=content)
+                self._git(
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    f"100644,{blob},{path}",
+                    env=environment,
+                )
+            tree = self._git("write-tree", env=environment)
+            return self._git(
+                "commit-tree",
+                tree,
+                "-p",
+                code_commit,
+                input="docs: record verified theorem solution and dependencies\n",
+                env=environment,
+            )
+
+    def _snapshot(self, node: NodeRecord) -> dict[str, Any]:
+        receipt = self._node_dir(node) / "github-solution.json"
+        source = (
+            node.integrated_commit if node.parent is None else node.candidate_commit
+        )
+        if receipt.exists():
+            held = json.loads(receipt.read_text(encoding="utf-8"))
+            if (
+                held["source_commit"] != source
+                or held["repository"] != self.github.repository
+            ):
+                raise PublicationError("accepted theorem publication changed on resume")
+            return held
+        if not source or not node.proof_base_commit:
+            raise PublicationError("verified node has no exact Git comparison range")
+        audit = self._latest_lean_audit(node)
+        if audit is None or self._theorem_publication_problem(node, audit):
+            raise PublicationError(
+                "solution PR requires the retained passing single-theorem audit"
+            )
+        namespace = self.publication_context["namespace"]
+        head = f"{namespace}/solutions/{self._node_slug(node)}"
+        base = (
+            self.config.github_base_branch
+            if node.parent is None
+            else f"{namespace}/bases/{self._node_slug(node)}"
+        )
+        records = self._problem_nodes() if node.parent is None else [node]
+        documents: dict[str, str] = {}
+        for record in records:
+            if record.status != "proved" or (
+                record.id != node.id and not record.github_pr_url
+            ):
+                raise PublicationError(
+                    "root PR requires every theorem's integrated solution and PR"
+                )
+            record_audit = self._latest_lean_audit(record)
+            if record_audit is None:
+                raise PublicationError(
+                    "solution is missing its passing independent audit"
+                )
+            folder = (
+                f"proofs/github/{slug(self.run_root.name)}/{self._node_slug(record)}"
+            )
+            documents[f"{folder}/proof.md"] = self._proof(record)
+            documents[f"{folder}/contract.md"] = self._issue_body(record)
+            documents[f"{folder}/lean-audit.json"] = (
+                record_audit.model_dump_json(indent=2) + "\n"
+            )
+            documents[f"{folder}/verification.json"] = (
+                json.dumps(
+                    {
+                        "node_id": record.id,
+                        "issue": record.github_issue_url,
+                        "solution_pr": record.github_pr_url
+                        or "see this branch's pull request",
+                        "candidate_commit": record.candidate_commit,
+                        "integrated_commit": record.integrated_commit,
+                        "proof_base_commit": record.proof_base_commit,
+                        "comparator_command": self.config.comparator_command,
+                        "required_success_marker": self.config.comparator_success,
+                        "machine_comparator_passed": True,
+                        "reviewer_comparator_passed": record_audit.comparator_passed,
+                        "parent": record.parent,
+                        "requires": record.depends_on + record.children,
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+        prefix = f"proofs/github/{slug(self.run_root.name)}"
+        documents[f"{prefix}/index.md"] = "\n".join(
+            [
+                "# Theorem solutions",
+                "",
+                "Local proof acceptance and GitHub merge status are separate.",
+                "",
+                "| Node | Issue | PR | Requires |",
+                "| --- | --- | --- | --- |",
+                *[
+                    f"| {one.id} | {one.github_issue_url} | {one.github_pr_url or 'this PR'} | "
+                    f"{', '.join(one.depends_on + one.children) or 'none'} |"
+                    for one in records
+                ],
+                "",
+            ]
+        )
+        made = {
+            "repository": self.github.repository,
+            "source_commit": source,
+            "candidate_commit": node.candidate_commit,
+            "base_commit": self.publication_context["base_commit"]
+            if node.parent is None
+            else node.proof_base_commit,
+            "base": base,
+            "head": head,
+            "commit": self._solution_commit(source, documents),
+            "artifact_path": prefix,
+        }
+        # Preserve the exact documentation commit before any remote write. On retry,
+        # timestamps or new PR links cannot create a competing head commit.
+        atomic_text(receipt, json.dumps(made, indent=2) + "\n")
+        return made
+
+    def _publish_solution(self, node: NodeRecord) -> None:
+        with self._publication_guard(), self._publication_lock:
+            self._check_workflow_health()
+            if node.status != "proved":
+                raise PublicationError("cannot publish an unverified theorem solution")
+            self._sync_issues([node])
+            snapshot = self._snapshot(node)
+            local_ref = f"refs/heads/{snapshot['head']}"
+            local_head = self._local_ref_head(local_ref)
+            if local_head and local_head != snapshot["commit"]:
+                raise PublicationError("local theorem publication branch moved")
+            if not local_head:
+                self._git("update-ref", local_ref, snapshot["commit"], "0" * 40)
+            if node.parent is not None:
+                self._publish_ref(snapshot["base"], snapshot["base_commit"])
+            self._publish_ref(snapshot["head"], snapshot["commit"])
+            issue_number = node.github_issue_url.rstrip("/").rsplit("/", 1)[-1]
+            body = (
+                f"Closes #{issue_number}\n\n"
+                f"Proves `{self._declaration_name(node)}` for node `{node.id}`. "
+                f"Full natural-language proof and Lean contract: {node.github_issue_url}.\n\n"
+                f"Prerequisites: {self._node_links(node.depends_on + node.children)}\n\n"
+                f"Verified candidate: `{node.candidate_commit}`. "
+                f"Locally integrated revision: `{node.integrated_commit}`.\n\n"
+                f"Machine comparator and independent reviewer comparator passed; "
+                f"the integration gate passed. The publication commit adds documentation "
+                f"to the exact source tree at `{snapshot['source_commit']}`.\n\n"
+                f"Proofs, contracts, audit and dependency index: `{snapshot['artifact_path']}`.\n\n"
+            )
+            if node.parent is not None:
+                body += (
+                    "This theorem PR targets its frozen proof base for independent review. "
+                    "The root solution PR delivers the integrated problem to the configured target branch. "
+                    "This workflow does not automatically merge or close issues.\n"
+                )
+            else:
+                body += "This root PR contains the complete integrated solution and all theorem proof records.\n\n"
+                body += "\n".join(
+                    f"Closes #{one.github_issue_url.rsplit('/', 1)[-1]}"
+                    for one in self._problem_nodes()
+                    if one.id != node.id
+                )
+            result = self.github.pull_request(
+                self._marker(node, "pr"),
+                f"Prove {self._declaration_name(node)}"[:240],
+                body,
+                head=snapshot["head"],
+                base=snapshot["base"],
+                commit=snapshot["commit"],
+            )
+            node.github_pr_url = result["html_url"]
+            node.github_pr_commit = snapshot["commit"]
+            self.store.render()
+            self._sync_issues([node])

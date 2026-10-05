@@ -245,6 +245,15 @@ class Store:
                 )
                 for record in ordered
             )
+            published = [record for record in ordered if record.github_issue_url]
+            if published:
+                rows.extend([
+                    "", "## GitHub theorem review", "",
+                    "Local `proved` means verified and integrated locally, not merged on GitHub.", "",
+                    "| Node | Issue | Solution PR |", "| --- | --- | --- |",
+                    *[f"| {record.id} | {record.github_issue_url} | "
+                      f"{record.github_pr_url or 'Pending'} |" for record in published],
+                ])
             atomic_text(self.root / "DAG.md", "\n".join(rows) + "\n")
 
     def publish(

@@ -548,6 +548,9 @@ class NodeRecord(BaseModel):
     workspace_result_commit: str = ""
     workspace_dispatch_branch: str = ""
     workspace_dispatch_commit: str = ""
+    github_issue_url: str = ""
+    github_pr_url: str = ""
+    github_pr_commit: str = ""
     lean_files: list[str] = Field(default_factory=list)
     worktree: str = ""
     proof_branch: str = ""

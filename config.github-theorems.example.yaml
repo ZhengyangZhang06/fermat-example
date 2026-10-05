@@ -1,0 +1,29 @@
+# Use with <path-to-this-flow>:github-theorem-prover, in a fresh Lean problem repo.
+# Replace the repository and root contract with the actual target before running.
+github_repository: YOUR_ORG/YOUR_PROBLEM_REPOSITORY
+github_workspace_remote: origin
+github_base_branch: main
+github_root_lean_name: Submission.main_theorem
+github_root_lean_statement: "∀ n : Nat, n + 0 = n"
+github_contract_file: Challenge.lean
+github_workspace_branch_prefix: humanize-workspace
+github_workspace_push_timeout: 300
+
+problem_id: ""
+lean_target: Submission.lean
+comparator_command: bash tools/check-with-comparator.sh
+comparator_success: Your solution is okay!
+
+max_depth: 2
+max_children: 4
+max_nodes: 24
+max_parallel_children: 24
+decomposition_attempts: 3
+rlcr_rounds: 20
+comparator_timeout: 21600
+
+reference_dir: .humanize/math-reference-library
+huggingface_token_env: HF_TOKEN
+artifact_dir: .humanize/github-theorem-prover
+wiki_dir: .humanize/math-wiki
+stop_on_child_failure: true

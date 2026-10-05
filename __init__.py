@@ -11,6 +11,8 @@ from typing import Annotated, Any, NamedTuple
 from hmz.flows import Agent, Moment, configures, flow, load
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from _recursive_lean.github_runtime import GitHubTheoremRuntime
+from _recursive_lean.lean_contract import validate_lean_statement
 from _recursive_lean.runtime import Runtime
 
 MIN_RECURSIVE_NODES = 3
@@ -265,6 +267,53 @@ class Config(BaseModel):
         return self
 
 
+class GitHubTheoremConfig(Config):
+    """The issue/PR workflow requires an explicit repository and root contract."""
+
+    github_workspace_remote: str = "origin"
+    github_repository: str = Field(
+        pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+        description="GitHub owner/repository receiving theorem issues and solution PRs",
+    )
+    github_base_branch: str = "main"
+    github_root_lean_name: str = Field(
+        pattern=r"^[A-Za-z_][A-Za-z0-9_'.]*$",
+        description="fully qualified Lean declaration for the root problem",
+    )
+    github_root_lean_statement: str = Field(
+        min_length=3,
+        description="exact root Lean type expression, without declaration or proof",
+    )
+    github_contract_file: str = "Challenge.lean"
+    artifact_dir: str = ".humanize/github-theorem-prover"
+
+    @field_validator("github_root_lean_statement")
+    @classmethod
+    def _root_type(cls, value: str) -> str:
+        return validate_lean_statement(value)
+
+    @field_validator("github_base_branch")
+    @classmethod
+    def _pr_base(cls, value: str) -> str:
+        return cls._git_branch_prefix(value)
+
+    @field_validator("github_contract_file")
+    @classmethod
+    def _contract_path(cls, value: str) -> str:
+        normalized = cls._relative_lean_target(value)
+        if not normalized:
+            raise ValueError("the frozen Lean contract file is required")
+        return normalized
+
+    @model_validator(mode="after")
+    def _publication_required(self) -> GitHubTheoremConfig:
+        if not self.github_workspace_remote:
+            raise ValueError("the issue/PR workflow requires a GitHub workspace remote")
+        if not self.github_root_lean_statement.strip():
+            raise ValueError("the exact root Lean statement is required")
+        return self
+
+
 class WorktreeRlcrConfig(BaseModel):
     """The official RLCR settings forwarded by an isolated node process."""
 
@@ -342,6 +391,21 @@ def run(
 
 
 @flow(
+    name="github-theorem-prover",
+    resumable=True,
+    about="Solve recursive Lean theorems with an issue and verified solution PR per node",
+)
+def github_theorem_prover(
+    agents: Agents,
+    task: str,
+    config: GitHubTheoremConfig,
+    state: dict[str, Any] | None = None,
+) -> None:
+    """Publish reviewed decomposition contracts and verified solutions to GitHub."""
+    GitHubTheoremRuntime(agents, task, config, state).execute()
+
+
+@flow(
     name="worktree-rlcr",
     resumable=True,
     selectable=False,
@@ -392,4 +456,12 @@ def worktree_rlcr(
         state.clear()
 
 
-__all__ = ["Agents", "Config", "WorktreeRlcrConfig", "run", "worktree_rlcr"]
+__all__ = [
+    "Agents",
+    "Config",
+    "GitHubTheoremConfig",
+    "WorktreeRlcrConfig",
+    "run",
+    "github_theorem_prover",
+    "worktree_rlcr",
+]

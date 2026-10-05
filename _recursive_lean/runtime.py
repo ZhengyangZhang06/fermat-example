@@ -933,6 +933,7 @@ class Runtime:
                     )
         plan_attempted = plan is not None
         while True:
+            self._check_workflow_health()
             node.attempts += 1
             attempt = node.attempts
             if plan is None:
@@ -1095,6 +1096,7 @@ class Runtime:
             feedback = outer_feedback
         while True:
             for _ in range(self.config.natural_proof_attempts):
+                self._check_workflow_health()
                 version = self._next_json_version(node, "natural-proof-draft")
                 self.store.update(
                     node.id,
@@ -1219,6 +1221,7 @@ class Runtime:
             )
         feedback = "None."
         for attempt in range(1, self.config.decomposition_attempts + 1):
+            self._check_workflow_health()
             self.store.update(
                 node.id,
                 "decomposing",
@@ -1788,6 +1791,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     try:
                         results[key] = future.result()
                     except Exception as error:  # noqa: BLE001
+                        self._check_workflow_health()
                         result = SolveResult(
                             ok=False,
                             node_id=made[key].id,
@@ -1809,6 +1813,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             return ""
         announced: tuple[str, ...] = ()
         while True:
+            self._check_workflow_health()
             with self._graph_lock:
                 missing_records = [
                     self.store.nodes.get(dependency) for dependency in node.depends_on
@@ -1987,6 +1992,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     if node.children or node.depends_on:
                         self._submit_speculative_parent(node)
             while self.store.nodes[root.id].status != "proved":
+                self._check_workflow_health()
                 for node in ready_nodes():
                     scheduled.add(node.id)
                     self.store.update(
@@ -2017,6 +2023,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     try:
                         result = future.result()
                     except Exception as error:  # noqa: BLE001
+                        self._check_workflow_health()
                         result = SolveResult(
                             ok=False,
                             node_id=node_id,
@@ -2096,6 +2103,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         """Keep an accepted mathematical proof frozen while Lean repair iterates."""
         feedback = ""
         while True:
+            self._check_workflow_health()
             self._advance_lean_attempt(node)
             if feedback:
                 self.store.update(
@@ -3220,6 +3228,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             comparator_command=self._review_command(node, []),
             comparator_success=self.config.comparator_success,
         )
+        task += self._theorem_publication_instructions(node)
         try:
             rlcr_ok, rlcr_log = self._run_rlcr_process(
                 node, worktree, plan_path, task, review_base
@@ -3287,7 +3296,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 comparator_command=self._review_command(node, lean_files),
                 comparator_success=self.config.comparator_success,
                 comparator_log=log[-12000:],
-            ),
+            ) + self._theorem_publication_instructions(node),
             LeanAudit,
         )
         if audit is not None:
@@ -3297,8 +3306,11 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 audit.model_dump_json(indent=2) + "\n",
             )
         reference_problem = self._reference_use_problem(audit)
-        if audit is None or not audit.passed or reference_problem:
-            return self._reject_lean_audit(node, audit, reference_problem)
+        contract_problem = self._theorem_publication_problem(node, audit)
+        if audit is None or not audit.passed or reference_problem or contract_problem:
+            return self._reject_lean_audit(
+                node, audit, reference_problem or contract_problem
+            )
         pushed, push_feedback = self._push_child_workspace_result(
             node, worktree, after
         )
@@ -3340,6 +3352,19 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             audit.theorems,
             log,
         )
+
+    def _check_workflow_health(self) -> None:
+        """Optional stop signal for infrastructure failures in derived workflows."""
+
+    def _theorem_publication_instructions(self, node: NodeRecord) -> str:
+        """Optional extra contract for workflows publishing one theorem per PR."""
+        return ""
+
+    def _theorem_publication_problem(
+        self, node: NodeRecord, audit: LeanAudit | None
+    ) -> str:
+        """Default flow permits the reviewer's complete theorem catalogue."""
+        return ""
 
     def _revise_parent(self, child: NodeRecord, failure: str) -> None:
         """Route an incorrect child theorem into the parent's NL-proof loop."""
@@ -4641,6 +4666,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         """
         retry = 0
         while True:
+            self._check_workflow_health()
             integrated, feedback = self._integrate_candidate(
                 worktree,
                 before,
