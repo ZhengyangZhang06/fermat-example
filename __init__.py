@@ -285,6 +285,19 @@ class GitHubTheoremConfig(Config):
         description="exact root Lean type expression, without declaration or proof",
     )
     github_contract_file: str = "Challenge.lean"
+    github_status_publish: bool = Field(
+        default=True,
+        description="publish each problem status website to GitHub Pages; local HTML is always generated",
+    )
+    github_status_branch: str = Field(
+        default="gh-pages",
+        description="dedicated GitHub Pages source branch for status websites",
+    )
+    github_status_interval: float = Field(
+        default=600,
+        ge=600,
+        description="seconds between hosted status snapshots; initial and final snapshots publish immediately",
+    )
     artifact_dir: str = ".humanize/github-theorem-prover"
 
     @field_validator("github_root_lean_statement")
@@ -292,7 +305,7 @@ class GitHubTheoremConfig(Config):
     def _root_type(cls, value: str) -> str:
         return validate_lean_statement(value)
 
-    @field_validator("github_base_branch")
+    @field_validator("github_base_branch", "github_status_branch")
     @classmethod
     def _pr_base(cls, value: str) -> str:
         return cls._git_branch_prefix(value)
@@ -311,6 +324,10 @@ class GitHubTheoremConfig(Config):
             raise ValueError("the issue/PR workflow requires a GitHub workspace remote")
         if not self.github_root_lean_statement.strip():
             raise ValueError("the exact root Lean statement is required")
+        if self.github_status_branch == self.github_base_branch:
+            raise ValueError(
+                "the status website branch must differ from the solution target branch"
+            )
         return self
 
 

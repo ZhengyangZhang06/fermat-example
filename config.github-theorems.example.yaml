@@ -9,6 +9,13 @@ github_contract_file: Challenge.lean
 github_workspace_branch_prefix: humanize-workspace
 github_workspace_push_timeout: 300
 
+# Each problem run gets a local status website and a GitHub Pages page.
+# Hosted snapshots update initially, every 10 minutes, and when the run ends.
+# Set false for local HTML only; proof work continues if hosting is unavailable.
+github_status_publish: true
+github_status_branch: gh-pages
+github_status_interval: 600
+
 problem_id: ""
 lean_target: Submission.lean
 comparator_command: bash tools/check-with-comparator.sh

@@ -16,7 +16,9 @@ from typing import Any
 from .github import GitHubClient, PublicationError, repository_from_url
 from .models import Decomposition, LeanAudit, NaturalProof, NodeRecord, SolveResult
 from .runtime import Runtime
-from .store import atomic_text, slug
+from .status_publisher import StatusPublisher
+from .status_site import StatusWebsite
+from .store import atomic_text, now, slug
 
 
 class GitHubTheoremRuntime(Runtime):
@@ -30,6 +32,16 @@ class GitHubTheoremRuntime(Runtime):
         self._publication_lock = threading.RLock()
         self._publication_abort: PublicationError | None = None
         self.publication_context: dict[str, str] = {}
+        self.website = StatusWebsite(
+            self.run_root / "website",
+            problem=config.problem_id or config.github_root_lean_name,
+            run=self.run_root.name,
+            repository=config.github_repository,
+            statement=config.github_root_lean_statement,
+            refresh_interval=config.github_status_interval,
+        )
+        self.store.on_render = self.website.render
+        self.store.render()
 
     def _check_workflow_health(self) -> None:
         if self._publication_abort is not None:
@@ -61,6 +73,13 @@ class GitHubTheoremRuntime(Runtime):
                 ) from error
             try:
                 self._prepare_publication()
+                publisher = StatusPublisher(self)
+                self._status_publisher = publisher
+                self.website.lifecycle = "running"
+                self.store.render()
+                print(f"Local problem status website: {self.website.entry}")
+                if self.config.github_status_publish:
+                    publisher.start()
                 self._reconcile_publications()
                 super().execute()
                 self._wait_for_integrations()
@@ -77,6 +96,19 @@ class GitHubTheoremRuntime(Runtime):
                     last_failure=str(error),
                 )
                 raise
+            finally:
+                root = self.store.nodes.get("root")
+                self.website.lifecycle = (
+                    "finished"
+                    if root
+                    and root.status == "proved"
+                    and not self.state.get("last_failure")
+                    else "paused"
+                )
+                self.store.render()
+                publisher = getattr(self, "_status_publisher", None)
+                if publisher is not None and self.config.github_status_publish:
+                    publisher.close()
 
     def _git(self, *args: str, input: str | None = None, env: Any = None) -> str:
         try:
@@ -219,7 +251,8 @@ class GitHubTheoremRuntime(Runtime):
             f"Local integration must pass before publication. Every decomposition child "
             f"has its own issue and verified solution PR.\n\n"
             f"Solution PR: {node.github_pr_url or 'Pending'}\n\n"
-            f"Remote merge status is recorded by GitHub; local `proved` does not mean merged.\n"
+            + (f"Status website: {self.website.url}\n\n" if self.website.url else "")
+            + "Remote merge status is recorded by GitHub; local `proved` does not mean merged.\n"
         )
 
     def _sync_issues(self, nodes: list[NodeRecord]) -> None:
@@ -494,6 +527,8 @@ class GitHubTheoremRuntime(Runtime):
                 f"to the exact source tree at `{snapshot['source_commit']}`.\n\n"
                 f"Proofs, contracts, audit and dependency index: `{snapshot['artifact_path']}`.\n\n"
             )
+            if self.website.url:
+                body += f"Problem status website: {self.website.url}\n\n"
             if node.parent is not None:
                 body += (
                     "This theorem PR targets its frozen proof base for independent review. "
@@ -517,5 +552,9 @@ class GitHubTheoremRuntime(Runtime):
             )
             node.github_pr_url = result["html_url"]
             node.github_pr_commit = snapshot["commit"]
+            node.github_pr_state = (
+                "merged" if result.get("merged_at") else result.get("state", "")
+            )
+            node.github_pr_checked_at = now()
             self.store.render()
             self._sync_issues([node])

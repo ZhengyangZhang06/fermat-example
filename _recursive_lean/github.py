@@ -13,6 +13,10 @@ from urllib.parse import urlsplit
 class PublicationError(RuntimeError):
     """An infrastructure failure; it must not trigger another mathematical proof."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 def repository_from_url(url: str) -> str:
     """Accept credential-free GitHub HTTPS and Git SSH remote coordinates."""
@@ -88,10 +92,12 @@ class GitHubClient:
                 "GitHub CLI unavailable or timed out; restore access and resume this run"
             ) from error
         if result.returncode:
+            status = re.search(r"\(HTTP (\d{3})\)", result.stderr or "")
             # Do not echo transport output: it may contain credential-helper diagnostics.
             raise PublicationError(
                 f"GitHub {method} {resource.split('?')[0]} failed; "
-                "check gh authentication/repository access, then resume"
+                "check gh authentication/repository access, then resume",
+                status_code=int(status.group(1)) if status else None,
             )
         try:
             value = json.loads(result.stdout)

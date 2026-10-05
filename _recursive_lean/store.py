@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from .models import NodeRecord, NodeStatus, ProvedTheorem
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -63,6 +64,7 @@ class Store:
         self.problem_artifact = ""
         self.reference_manifest = ""
         self.nodes: dict[str, NodeRecord] = {}
+        self.on_render: Callable[[dict[str, Any]], None] | None = None
         self._lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
         self.wiki.mkdir(parents=True, exist_ok=True)
@@ -255,6 +257,8 @@ class Store:
                       f"{record.github_pr_url or 'Pending'} |" for record in published],
                 ])
             atomic_text(self.root / "DAG.md", "\n".join(rows) + "\n")
+            if self.on_render is not None:
+                self.on_render(payload)
 
     def publish(
         self,

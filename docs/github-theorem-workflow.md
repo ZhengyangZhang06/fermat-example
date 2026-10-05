@@ -3,7 +3,8 @@
 The named flow `github-theorem-prover` extends the reference branch's reviewed
 parent-to-child handoffs, isolated Lean worktrees, recursive scheduler, machine
 comparator, independent reviewer comparator, and integration checks. Each theorem
-node now also has an issue and a solution PR. The existing default flow is unchanged.
+node now also has an issue and a solution PR. Each problem run has its own status
+website. The existing default flow is unchanged.
 
 ## Lifecycle
 
@@ -82,6 +83,9 @@ Copy `config.github-theorems.example.yaml` to the problem repository and set:
 | `github_contract_file` | Tracked Lean source containing the original problem context |
 | `lean_target` | Candidate Lean source file |
 | `comparator_command` | Existing comparator that checks the exact frozen problem |
+| `github_status_publish` | Publish the status website to Pages (default `true`); local HTML is always generated |
+| `github_status_branch` | Dedicated Pages source branch, default `gh-pages`; must differ from the solution target |
+| `github_status_interval` | Seconds between hosted snapshots, default/minimum `600` |
 
 For example, after installing this checkout as `user/recursive_lean_prover`:
 
@@ -106,6 +110,67 @@ The flow handles one root theorem per invocation. For multiple independent roots
 run it once for each selected problem with the correct root contract. This workflow
 does not turn an unproved mathematical claim into a solved claim merely by opening
 an issue or PR.
+
+## Status website for every problem
+
+Each run generates a responsive static website as soon as its local state exists,
+including before GitHub preflight succeeds. The page shows:
+
+- Current problem phase and counts of verified, integrating and pending theorems.
+- The theorem hierarchy, dependency links and expandable exact Lean statements.
+- Issue and solution PR links, plus the last recorded PR merge state and check time.
+- Search, status filters and access to earlier decompositions.
+- Snapshot time, running/finished/paused state, and a warning for stale running snapshots.
+
+Proof verification and GitHub merge status are separate. Only the active dependency
+graph contributes to completion. Missing or cyclic dependencies cannot report a
+verified problem. The website publishes an explicit subset of DAG fields; local
+paths, agent prompts, authentication and raw process logs are not included.
+
+Local HTML updates on every saved DAG change. The page reloads every minute unless
+someone is reading an expanded theorem or using the filters. It works from disk or
+a basic static web server, with no external scripts, fonts, build tools or browser
+credentials. Find the local page at the path printed by the workflow, or beneath:
+
+```text
+<run_dir>/website/theorem-status/<problem-key>/<run>/index.html
+```
+
+For a local demonstration with clearly labelled sample data:
+
+```sh
+python scripts/preview-status.py /tmp/proof-status-preview
+python -m http.server 8000 --directory /tmp/proof-status-preview
+# Open http://localhost:8000/theorem-status/index.html
+```
+
+Hosting is enabled by default. The publisher pushes only website files to a
+separate `gh-pages` branch, enables branch-based Pages when it is not configured,
+and uses the Pages API's actual URL (including any existing custom domain). Each
+problem run lives under `/theorem-status/<problem-key>/<run>/`, with a shared index
+at `/theorem-status/index.html`. Issues and PRs link to the status website when its
+hosting URL is available. A concurrent run adds its page to the latest website
+branch without overwriting earlier problem pages or an existing homepage.
+
+The first snapshot publishes before proof work; later hosted updates run in the
+background every ten minutes by default, with a final snapshot when the run exits.
+They also refresh recorded PR states. The browser displays the latest deployed
+snapshot; Pages builds are asynchronous, so a pushed source revision is not a claim
+that deployment has completed. Once the run stops, its website remains a timestamped
+snapshot; resume the workflow to refresh it again.
+
+Enabling a new Pages site requires permission to manage Pages. An existing site
+must use the configured website branch and its root directory; the workflow will
+not change an unrelated site's publishing settings. These source and permission
+requirements follow the [GitHub Pages REST API](https://docs.github.com/en/rest/pages/pages#create-a-github-pages-site).
+GitHub's [Pages source documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+describes deployment from a branch. The website namespace has an ownership marker;
+an unrelated existing `theorem-status/` directory is not replaced.
+
+An unavailable host, permission failure or conflicting Pages configuration does
+not invalidate a proof or stop mathematical work. Local pages continue to update;
+the next scheduled publish retries, and `github-status.json` records the hosting
+result. Set `github_status_publish: false` for a local website only.
 
 ## Resume and evidence
 
@@ -137,3 +202,7 @@ They cover recursive issues, root and child PRs, dependency links, unchanged Lea
 source, retry after a lost successful response, durable publication receipts,
 unverified-proof rejection, and protection against moved remote branches. They do
 not launch model sessions, run Lean, or publish to a live GitHub repository.
+
+Website tests additionally exercise HTML escaping, dependency-aware completion,
+local updates, remote PR-state snapshots, initial/final publication, preservation
+of other pages, concurrent pushes and recovery from hosting failures.

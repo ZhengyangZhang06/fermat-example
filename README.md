@@ -5,7 +5,9 @@ This branch adds **`github-theorem-prover`**, a separate workflow built on
 at `1275e4304940215bad57ad001cf4fd5f7059f5d3`. It creates an issue containing the exact
 Lean problem and reviewed natural-language proof for every theorem and recursive
 subtheorem, then publishes one verified solution PR per node. The root PR delivers
-the complete integrated problem. The original default workflow remains available.
+the complete integrated problem. Every problem also gets an automatically updated
+status website with its theorem dependencies, verification progress, and issue/PR
+links, published to GitHub Pages. The original default workflow remains available.
 
 See [the GitHub theorem workflow guide](docs/github-theorem-workflow.md) and
 [its example configuration](config.github-theorems.example.yaml).

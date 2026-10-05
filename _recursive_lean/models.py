@@ -551,6 +551,8 @@ class NodeRecord(BaseModel):
     github_issue_url: str = ""
     github_pr_url: str = ""
     github_pr_commit: str = ""
+    github_pr_state: Literal["", "open", "closed", "merged"] = ""
+    github_pr_checked_at: str = ""
     lean_files: list[str] = Field(default_factory=list)
     worktree: str = ""
     proof_branch: str = ""
