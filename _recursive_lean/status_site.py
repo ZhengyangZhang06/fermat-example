@@ -191,7 +191,7 @@ def render_page(data: dict[str, Any]) -> str:
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(data["problem"])} · Proof status</title><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head>
-<body data-updated="{esc(data["updated_at"], quote=True)}" data-lifecycle="{esc(data["lifecycle"], quote=True)}" data-stale-after="{int(data.get("stale_after_seconds", 1800))}">
+<body data-repository="{esc(data["repository"], quote=True)}" data-run="{esc(data["run"], quote=True)}" data-updated="{esc(data["updated_at"], quote=True)}" data-lifecycle="{esc(data["lifecycle"], quote=True)}" data-stale-after="{int(data.get("stale_after_seconds", 1800))}">
 <header><a class="brand" href="../../index.html">◈ Proof status</a><nav>{repo}<a href="status.json">Status JSON</a></nav></header>
 <main><section class="hero"><div><p class="eyebrow">PROBLEM WORKSPACE</p><h1>{esc(data["problem"])}</h1>
 <p class="subtitle">Theorems, dependencies, and evidence for one mathematical problem.</p><p class="run">Run <code>{esc(data["run"])}</code></p></div>
@@ -199,6 +199,7 @@ def render_page(data: dict[str, Any]) -> str:
 <p>Snapshot updated<br><time>{esc(data["updated_at"])}</time></p><small>Run {esc(data["lifecycle"])} · refreshes every minute</small></div></section>
 <p id="stale" class="notice" hidden>This running snapshot has not updated recently. The publisher may be offline; check GitHub for the latest evidence.</p>
 {('<p class="notice">The dependency graph has missing nodes or a cycle. Completion cannot be confirmed.</p>' if not data["graph_ok"] else "")}
+{render_activity(data.get("activity"))}
 <section class="metrics" aria-label="Proof progress"><article><span>Verified & integrated</span><strong>{data["verified"]}<em> / {total}</em></strong></article>
 <article><span>Accepted, integrating</span><strong>{data["accepted"] - data["verified"]}</strong></article>
 <article><span>Awaiting verification</span><strong>{total - data["accepted"]}</strong></article>
@@ -213,6 +214,35 @@ def render_page(data: dict[str, Any]) -> str:
 <details class="contract"><summary>Root Lean problem</summary><pre>{esc(data["statement"])}</pre></details>
 <footer>Only the current dependency graph contributes to completion. Earlier decompositions remain available under “All decompositions”.<br>Generated from the proof workflow’s saved records. No GitHub token is needed by this page.</footer>
 </main></body></html>'''
+
+
+def render_activity(activity: dict[str, Any] | None) -> str:
+    """Operational observations are deliberately separate from proof acceptance."""
+    if not activity:
+        return ""
+    esc = html.escape
+    build = activity["build"]
+    count = ""
+    if build.get("total"):
+        count = (
+            f"<p>{int(build['completed']):,} / {int(build['total']):,} build jobs "
+            f"({100 * build['completed'] / build['total']:.1f}%)</p>"
+            f'<progress value="{int(build["completed"])}" max="{int(build["total"])}"></progress>'
+        )
+    workers = "".join(
+        f"<li><b>{esc(one['title'])}</b>: {esc(one['activity'])}"
+        f"<br><small>Last worker log activity: {esc(one['last_activity'] or 'Not recorded')}</small></li>"
+        for one in activity["workers"]
+    )
+    return f"""<section class="panel live-activity" aria-label="Current workflow activity">
+<div class="panel-head"><div><h2>Current activity</h2>
+<p>Observed {esc(activity["observed_at"])} · Controller {esc(activity["controller"])}</p>
+<p>Theorem records last saved {esc(activity["dag_updated_at"])}</p></div></div>
+<div class="activity-body"><h3>Lean dependencies: {esc(build["state"])}</h3>{count}
+<p>Latest completed module: <code>{esc(build.get("latest_module") or "Not recorded")}</code><br>
+<small>Build log last changed: {esc(build.get("last_activity") or "Not recorded")}</small></p>
+<p>Dependency compilation is setup progress, not mathematical proof completion.</p>
+<ul>{workers}</ul></div></section>"""
 
 
 def render_catalog(entries: list[dict[str, Any]]) -> str:
