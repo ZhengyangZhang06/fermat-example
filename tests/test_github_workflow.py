@@ -335,6 +335,36 @@ class GitHubRuntimeTests(unittest.TestCase):
         self.assertEqual(self.api.issues[0]["state"], "open")
         self.assertFalse(self.api.prs)
 
+    def test_root_merges_advanced_base_already_in_verified_integration(self):
+        root = self.node("root")
+        self.runtime._sync_issues([root])
+        self.runtime.config = self.runtime.config.model_copy(update={"github_auto_merge": True, "github_close_proved_issues": True})
+        (self.project / "README.md").write_text("Earlier authorized main update\n")
+        git(self.project, "add", "README.md")
+        git(self.project, "commit", "-m", "advance main before proof integration")
+        git(self.project, "push", "origin", "main")
+        self.accept(root)
+        self.runtime._publish_solution(root)
+        self.assertEqual(root.github_pr_state, "merged")
+        self.assertEqual(root.github_issue_state, "closed")
+        self.assertEqual(git(self.bare, "show", "main:README.md"), "Earlier authorized main update")
+        self.runtime._publish_solution(root)  # Already merged is still idempotent.
+        self.assertEqual(len(self.api.prs), 1)
+
+    def test_root_rejects_target_changes_absent_from_verified_integration(self):
+        root = self.node("root")
+        self.runtime._sync_issues([root])
+        self.runtime.config = self.runtime.config.model_copy(update={"github_auto_merge": True, "github_close_proved_issues": True})
+        self.accept(root)
+        (self.project / "README.md").write_text("Unreviewed later target update\n")
+        git(self.project, "add", "README.md")
+        git(self.project, "commit", "-m", "advance main after verified checkpoint")
+        git(self.project, "push", "origin", "main")
+        with self.assertRaisesRegex(PublicationError, "not contained in the verified integration"):
+            self.runtime._publish_solution(root)
+        self.assertEqual(self.api.issues[0]["state"], "open")
+        self.assertIsNone(self.api.prs[0]["merged_at"])
+
     def test_merge_failure_does_not_close_issue(self):
         self.node("root")
         child = self.node("root.child", "root")

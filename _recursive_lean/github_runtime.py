@@ -753,7 +753,25 @@ class GitHubTheoremRuntime(Runtime):
                 audit = self._latest_lean_audit(node)
                 if not node.integrated_commit or audit is None or self._theorem_publication_problem(node, audit):
                     raise PublicationError("automatic merge requires retained proof and integration evidence")
-                merged = self.github.merge_verified(result, commit=snapshot["commit"], base_commit=snapshot["base_commit"])
+                merge_base = snapshot["base_commit"]
+                if node.parent is None and not result.get("merged_at"):
+                    # The original contract stays frozen, but main may have
+                    # advanced while proofs ran. Only accept a newer target tip
+                    # already contained in the exact verified integration history.
+                    current_base = self._fetch_workspace_branch(
+                        self.config.github_workspace_remote, snapshot["base"]
+                    )
+                    if not current_base:
+                        raise PublicationError("could not resolve the root merge target")
+                    try:
+                        self._git("merge-base", "--is-ancestor", merge_base, current_base)
+                        self._git("merge-base", "--is-ancestor", current_base, snapshot["source_commit"])
+                    except PublicationError as error:
+                        raise PublicationError(
+                            "root target changes are not contained in the verified integration; revalidation required"
+                        ) from error
+                    merge_base = current_base
+                merged = self.github.merge_verified(result, commit=snapshot["commit"], base_commit=merge_base)
                 merge_commit = merged.get("merge_commit_sha", "")
                 tip = self._fetch_workspace_branch(self.config.github_workspace_remote, snapshot["base"])
                 if not merge_commit or not tip or self._git("rev-parse", f"{merge_commit}^{{tree}}") != self._git("rev-parse", f"{snapshot['commit']}^{{tree}}"):

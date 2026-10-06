@@ -31,6 +31,13 @@ solution into the configured target branch. Both options default off in other
 experiments until authorization is supplied. The dashboard reports issue and PR
 states separately from proof acceptance.
 
+For the root PR, `main` may advance after the original contract is frozen. A newer
+target is allowed only if it descends from that original base and is already an
+ancestor of the exact verified integration commit. The final merge still checks
+the freshly observed target SHA and resulting tree. Changes absent from the
+verified history require integration and verification again; the frozen problem
+contract is never updated to accommodate a moving target.
+
 The status page includes an accessible SVG dependency DAG with prerequisite-to-
 dependent arrows, clickable theorem cards, status colors, related-edge highlighting,
 zoom controls, and a compact eight-worker roster. These are workflow prerequisites;
