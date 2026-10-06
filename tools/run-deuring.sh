@@ -3,7 +3,7 @@ set -euo pipefail
 experiment_root=/mnt/data/zhengyang-workspace/fermat-example
 cd "$experiment_root"
 export CODEX_HOME=/home/ubuntu/.codex
-export PATH="$experiment_root/.humanize/toolchains/lean-4.33.1-linux/bin:/home/ubuntu/.local/bin:$PATH"
+export PATH="$experiment_root/tools:$experiment_root/.humanize/toolchains/lean-4.33.1-linux/bin:/home/ubuntu/.local/bin:$PATH"
 export PYTHONPATH=/mnt/data/zhengyang-workspace/humanize2/src:/mnt/data/zhengyang-workspace/humanize2/.venv/lib/python3.12/site-packages
 export PYTHONUNBUFFERED=1
 agent_spec=$(/home/ubuntu/.local/bin/python3.12 - <<'PY'

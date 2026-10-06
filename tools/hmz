@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# The environment's original venv launcher points at an unavailable interpreter.
+export PYTHONPATH="/mnt/data/zhengyang-workspace/humanize2/src:/mnt/data/zhengyang-workspace/humanize2/.venv/lib/python3.12/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+exec /home/ubuntu/.local/bin/python3.12 -m hmz "$@"
