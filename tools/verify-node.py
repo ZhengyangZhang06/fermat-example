@@ -179,6 +179,7 @@ def sandbox(directory, args, *, lean_path="", capture=False):
 
 
 def export(directory, module, name, destination):
+    names = [name] if isinstance(name, str) else name
     sandbox(directory, ["lake", "--no-cache", "build", module])
     lean_path = run(
         ["lake", "env", "printenv", "LEAN_PATH"], directory, capture=True
@@ -186,7 +187,7 @@ def export(directory, module, name, destination):
     exporter = TOOLS / "lean4export/.lake/build/bin/lean4export"
     exported = sandbox(
         directory,
-        [exporter, module, "--", name, *AXIOMS, *PRIMITIVES],
+        [exporter, module, "--", *names, *AXIOMS, *PRIMITIVES],
         lean_path=lean_path,
         capture=True,
     ).stdout
@@ -194,6 +195,7 @@ def export(directory, module, name, destination):
 
 
 def compare(root, name, *, mathlib=True):
+    names = [name] if isinstance(name, str) else name
     challenge, solution = root / "challenge", root / "solution"
     configure(challenge, mathlib=mathlib)
     configure(solution, mathlib=mathlib)
@@ -202,7 +204,7 @@ def compare(root, name, *, mathlib=True):
     config = {
         "challenge_module": "Challenge",
         "solution_module": "Solution",
-        "theorem_names": [name],
+        "theorem_names": names,
         "permitted_axioms": AXIOMS,
         "enable_nanoda": False,
     }
@@ -263,6 +265,52 @@ def self_test():
             print(
                 f"SELF-TEST {title}: {'accepted' if result else 'rejected'}", flush=True
             )
+    # A valid root cannot hide a missing/renamed or unproved child interface.
+    for title, child, accepted in [
+        ("combined-valid", "theorem Child : True := True.intro", True),
+        ("combined-renamed", "theorem Wrong.Child : True := True.intro", False),
+        ("combined-sorry", "theorem Child : True := by sorry", False),
+        ("combined-changed-type", "theorem Child : False → False := fun h => h", False),
+    ]:
+        with tempfile.TemporaryDirectory(prefix="deuring-combined-test-") as tmp:
+            root = Path(tmp)
+            write(root / "challenge/Challenge.lean", ordinary_challenge + "theorem Child : True := by sorry\n")
+            write(root / "solution/Solution.lean", "theorem toy : True := True.intro\n" + child + "\n")
+            try:
+                compare(root, ["toy", "Child"], mathlib=False)
+                result = True
+            except subprocess.CalledProcessError:
+                result = False
+            if result != accepted:
+                raise RuntimeError(f"comparator self-test failed: {title}")
+            print(f"SELF-TEST {title}: {'accepted' if result else 'rejected'}", flush=True)
+
+
+def root_child_contracts(dag, root_id):
+    """Collect the frozen interfaces of every retained prerequisite in the DAG."""
+    nodes = {one["id"]: one for one in dag["nodes"]}
+    found = {}
+    pending = [root_id]
+    visited = set()
+    while pending:
+        node_id = pending.pop()
+        if node_id in visited:
+            continue
+        visited.add(node_id)
+        record = nodes[node_id]
+        pending.extend(record.get("children", []))
+        pending.extend(record.get("depends_on", []))
+        if node_id == root_id:
+            continue
+        if record["status"] not in ("proved", "integrating"):
+            raise RuntimeError(f"root prerequisite is not accepted: {node_id}")
+        name = f"Submission.{record['lean_name']}"
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_'.]*", name):
+            raise RuntimeError("invalid frozen child Lean name")
+        if name in found:
+            raise RuntimeError(f"duplicate child interface: {name}")
+        found[name] = record["lean_statement"]
+    return dict(sorted(found.items()))
 
 
 def verify():
@@ -299,11 +347,15 @@ def verify():
         contract = context["contract"].rstrip()
         if ":=" not in contract:
             contract += " := by\n  sorry"
+        children = root_child_contracts(dag, node_id)
+        for child_name, child_statement in children.items():
+            contract += f"\n\ntheorem {child_name} : {child_statement} := by\n  sorry"
     else:
         contract = (
             "import Submission\n"
             + f"theorem {name} : {node['lean_statement']} := by\n  sorry"
         )
+    names = [name, *children] if node_id == "root" else [name]
     write(root / "challenge/Challenge.lean", contract + "\n")
     write(root / "solution/Solution.lean", "import Submission\n")
     write(
@@ -312,6 +364,7 @@ def verify():
             {
                 "node": node_id,
                 "theorem": name,
+                "checked_theorems": names,
                 "candidate_commit": revision,
                 "base_commit": base,
                 "root_contract_commit": context["source_commit"],
@@ -324,9 +377,10 @@ def verify():
             indent=2,
         ),
     )
-    compare(root, name)
+    compare(root, names)
     write(
-        root / "solution/AxiomReport.lean", f"import Solution\n#print axioms {name}\n"
+        root / "solution/AxiomReport.lean",
+        "import Solution\n" + "".join(f"#print axioms {one}\n" for one in names),
     )
     sandbox(root / "solution", ["lake", "env", "lean", "AxiomReport.lean"])
     if check_dependency_sources(PROJECT / ".lake/packages", manifest) != dependencies:

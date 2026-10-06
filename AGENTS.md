@@ -14,6 +14,11 @@
   integration checks; respect branch protection. Close its issue only after a
   confirmed merge with the verified tree. Never mark an unverified theorem solved.
   Child PRs merge into their frozen review bases; the root PR integrates into main.
+- Final root verification checks the exact root AND every retained child/prerequisite
+  declaration together, including their frozen types and transitive axioms. Preserve
+  each child's original fully qualified name even when the root proof does not use
+  it. Remove duplicated namespace/scaffold artifacts introduced during integration;
+  a root-only passing check is insufficient evidence for the combined delivery.
 
 ## Recovered reference material
 
