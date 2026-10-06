@@ -1,0 +1,33 @@
+{
+  "reference_use": [
+    {
+      "source": "local-project",
+      "queries": [
+        "rg -n 'theorem (den_pow|sub_intCast_den|mul_den_dvd|coe_int_num_of_den_eq_one)|lemma (den_pow|sub_intCast_den|mul_den_dvd|coe_int_num_of_den_eq_one)' /mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/Data/Rat",
+        "rg -n 'no_integer_scalar|deuring_no_integer_scalar_relation_f6caab1a65' /mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project /mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib"
+      ],
+      "files": [
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/manifest.json",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project/Submission.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/Data/Rat/Lemmas.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/Data/Rat/Defs.lean"
+      ],
+      "conclusion": "Inspected the existing rational denominator divisibility, integer-subtraction denominator, and denominator-one numerator lemmas. No matching node declaration was found. The manifest pins project 9d6f2efe18bb6dd0747b7e00cae619ebb8cbe50b and mathlib db584cd6d46c92f209a44c0f1c829460d327499d; candidate dependencies match. The exact comparator independently exited zero with 'Your solution is okay!' and reported only propext, Classical.choice, and Quot.sound. The sole candidate change adds the tracked theorem; imports, frozen challenge, and inherited root placeholder are preserved."
+    }
+  ],
+  "publication_proof_reviewed": false,
+  "publication_proof_blob": "",
+  "accepted": true,
+  "comparator_reran": true,
+  "comparator_passed": true,
+  "proof_matches_statement": true,
+  "issues": [],
+  "theorems": [
+    {
+      "name": "Submission.deuring_no_integer_scalar_relation_f6caab1a65",
+      "statement": "∀ {R : Type*} [Ring R] [CharZero R] (f : R) (t q : ℤ), f ^ 2 - (t : R) * f + (q : R) = 0 → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → ∀ c e : ℤ, c ≠ 0 → (c : R) * f ≠ (e : R)",
+      "lean_file": "Submission.lean",
+      "natural_summary": "Assuming cf = e, centrality of integer casts and characteristic-zero injectivity yield e² − tce + qc² = 0 over ℤ. Thus e/c is a rational root. Its positive reduced denominator d satisfies d² ∣ d, forcing d = 1 and producing an integer root, contradicting the hypothesis. No cancellation in R is used."
+    }
+  ]
+}
