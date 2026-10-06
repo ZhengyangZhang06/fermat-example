@@ -5476,6 +5476,9 @@ The fresh reviewer comparator rerun, theorem-wiki publication, and DAG `proved` 
 outer-controller tasks. They cannot run until this nested RLCR invocation returns, and they are
 not blockers for completion of this implementation-only plan.
 """
+        # Nested RLCR drives its author/reviewer from this plan; the launch task
+        # alone is not a reliable handoff for implementation-owned deliverables.
+        content += self._theorem_publication_instructions(node)
         atomic_text(path, content)
         return path
 

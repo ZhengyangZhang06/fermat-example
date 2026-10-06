@@ -273,6 +273,28 @@ class GitHubRuntimeTests(unittest.TestCase):
         )
         self.runtime.store.render()
 
+    def test_nested_plan_contains_root_final_prose_deliverable(self):
+        root = self.node("root")
+        plan = self.runtime._implementation_plan(
+            root,
+            accepted_plan=self.project / "historical-plan.md",
+            natural_path=self.project / root.natural_proof,
+            children="- None",
+        ).read_text()
+        self.assertIn(self.runtime._final_root_proof_path(), plan)
+        self.assertIn("implementation author must commit", plan)
+        self.assertIn("different valid formal proof route", plan)
+        self.assertIn("publication_proof_blob", plan)
+        child = self.node("root.child", "root")
+        child_plan = self.runtime._implementation_plan(
+            child,
+            accepted_plan=self.project / "historical-child-plan.md",
+            natural_path=self.project / child.natural_proof,
+            children="- None",
+        ).read_text()
+        self.assertIn("One theorem per solution PR", child_plan)
+        self.assertNotIn(self.runtime._final_root_proof_path(), child_plan)
+
     def test_root_final_prose_requires_review_of_exact_committed_blob(self):
         schema = LeanAudit.model_json_schema()
         self.assertEqual(set(schema["required"]), set(schema["properties"]))
