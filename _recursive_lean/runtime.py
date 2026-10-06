@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -19,7 +20,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-import fcntl
 from hmz.flows import Stopped, load
 
 from .models import (
@@ -47,6 +47,8 @@ from .preflight import (
     ReferenceBundle,
     ReferenceLibrary,
     infer_problem_id,
+)
+from .preflight import (
     problem_context as render_problem_context,
 )
 from .prompts import (
@@ -838,6 +840,8 @@ class Runtime:
             return "structured stage omitted its mandatory reference-use ledger"
         if self.reference_bundle is None:
             return "reference-use ledger cannot be checked before reference preflight"
+        if {one.source for one in records} != set(self.reference_bundle.paths):
+            return "reference-use ledger does not match this run's configured sources"
         for record in records:
             root = self.reference_bundle.paths[record.source].resolve()
             valid_path = False
@@ -868,9 +872,7 @@ class Runtime:
                     "updated_at": now(),
                     "status": status,
                     "message": message,
-                    "required_references": [
-                        source.name for source in REFERENCE_SOURCES
-                    ],
+                    "required_references": self.store.required_references,
                     "problem_id": self.problem_id or None,
                 },
                 indent=2,

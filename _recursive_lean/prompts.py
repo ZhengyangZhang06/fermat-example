@@ -364,7 +364,7 @@ this isolated speculative worktree:
 {children}
 
 Treat every listed child as proved and implement the parent immediately. Read the accepted natural
-proof and all three mandatory local reference sources before editing. Use the exact child names in
+proof and every configured local reference source before editing. Use the exact child names in
 the proof so the real declarations can replace the temporary assumptions without changing the
 parent argument.
 

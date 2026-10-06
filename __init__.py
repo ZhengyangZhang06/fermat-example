@@ -271,6 +271,10 @@ class GitHubTheoremConfig(Config):
     """The issue/PR workflow requires an explicit repository and root contract."""
 
     github_workspace_remote: str = "origin"
+    local_problem: bool = Field(
+        default=False,
+        description="Use the committed GitHub contract and pinned local project instead of Lean-Eval acquisition",
+    )
     github_repository: str = Field(
         pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
         description="GitHub owner/repository receiving theorem issues and solution PRs",

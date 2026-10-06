@@ -174,6 +174,28 @@ result. Set `github_status_publish: false` for a local website only.
 
 ## Resume and evidence
 
+### Local repository problems
+
+Set `local_problem: true` for a supplied local Lean contract. This opt-in mode
+freezes the tracked `github_contract_file` at the run's source revision instead
+of acquiring a Lean-Eval problem. It does not fabricate leaderboard metadata.
+The existing local `lake-manifest.json` must pin mathlib and its checkout must
+be clean at that revision. Project and mathlib reference clones are frozen for
+the run and checked for changes on resume.
+
+In this mode each stage records one `reference_use` entry for `local-project`,
+citing actual files inside that snapshot. The three Lean-Eval reference corpora
+are not required. All statement, comparator, independent review, decomposition,
+issue/PR and integration gates remain unchanged. The default Lean-Eval mode
+still requires all three original corpora. A real project comparator must be
+provided; local acquisition does not waive verification.
+
+Run the flow from an isolated directory (for example a clone under
+`.humanize/flows/math-lean-flow`) if Humanize's dependency installation lives under
+the same broad workspace parent as the original flow checkout. Humanize unloads
+modules beneath a flow's parent after loading it; sharing that parent with Python
+site-packages can otherwise break configuration type discovery.
+
 Rerun the same command with the same task, configuration and problem repository.
 The run records its repository/contract identity in `github-workflow.json`, stores
 issue/PR URLs in `dag.json`, and displays them in `DAG.md`. Each node retains a

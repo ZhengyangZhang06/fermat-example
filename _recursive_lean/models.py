@@ -13,7 +13,7 @@ from .lean_contract import validate_lean_statement
 
 MIN_SUBPROBLEMS = 2
 
-ReferenceName = Literal["TauCeti", "lean-pool", "mathlib-internal"]
+ReferenceName = Literal["TauCeti", "lean-pool", "mathlib-internal", "local-project"]
 
 
 class ReferenceUse(BaseModel):
@@ -40,9 +40,9 @@ class ReferenceAware(BaseModel):
     """Structured stage output that proves all three corpora were considered."""
 
     reference_use: list[ReferenceUse] = Field(
-        min_length=3,
+        min_length=1,
         max_length=3,
-        description="exactly one retrieval record for each mandatory source",
+        description="one record per configured source: local-project for local problems, otherwise the three reference corpora",
     )
 
     @field_validator("reference_use")
@@ -50,6 +50,8 @@ class ReferenceAware(BaseModel):
     def _all_reference_sources(cls, value: list[ReferenceUse]) -> list[ReferenceUse]:
         expected = {"TauCeti", "lean-pool", "mathlib-internal"}
         found = {one.source for one in value}
+        if found == {"local-project"} and len(value) == 1:
+            return value
         if found != expected or len(value) != len(found):
             raise ValueError(
                 "reference_use must contain exactly TauCeti, lean-pool, and mathlib-internal"

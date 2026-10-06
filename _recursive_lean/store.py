@@ -63,6 +63,7 @@ class Store:
         self.task = task
         self.problem_artifact = ""
         self.reference_manifest = ""
+        self.required_references = ["TauCeti", "lean-pool", "mathlib-internal"]
         self.nodes: dict[str, NodeRecord] = {}
         self.on_render: Callable[[dict[str, Any]], None] | None = None
         self._lock = threading.RLock()
@@ -164,11 +165,7 @@ class Store:
                 "task": self.task,
                 "problem_artifact": self.problem_artifact,
                 "reference_manifest": self.reference_manifest,
-                "required_references": [
-                    "TauCeti",
-                    "lean-pool",
-                    "mathlib-internal",
-                ],
+                "required_references": self.required_references,
                 "nodes": [one.model_dump(mode="json") for one in ordered],
             }
             atomic_text(
@@ -219,8 +216,8 @@ class Store:
                 f"Updated: {payload['updated_at']}",
                 f"Fetched problem: `{self.problem_artifact or 'preflight pending'}`",
                 (
-                    "Mandatory references for every stage: TauCeti, lean-pool, and "
-                    "mathlib-internal"
+                    "Mandatory references for every stage: "
+                    + ", ".join(self.required_references)
                 ),
                 f"Reference manifest: `{self.reference_manifest or 'preflight pending'}`",
                 "",
@@ -249,13 +246,22 @@ class Store:
             )
             published = [record for record in ordered if record.github_issue_url]
             if published:
-                rows.extend([
-                    "", "## GitHub theorem review", "",
-                    "Local `proved` means verified and integrated locally, not merged on GitHub.", "",
-                    "| Node | Issue | Solution PR |", "| --- | --- | --- |",
-                    *[f"| {record.id} | {record.github_issue_url} | "
-                      f"{record.github_pr_url or 'Pending'} |" for record in published],
-                ])
+                rows.extend(
+                    [
+                        "",
+                        "## GitHub theorem review",
+                        "",
+                        "Local `proved` means verified and integrated locally, not merged on GitHub.",
+                        "",
+                        "| Node | Issue | Solution PR |",
+                        "| --- | --- | --- |",
+                        *[
+                            f"| {record.id} | {record.github_issue_url} | "
+                            f"{record.github_pr_url or 'Pending'} |"
+                            for record in published
+                        ],
+                    ]
+                )
             atomic_text(self.root / "DAG.md", "\n".join(rows) + "\n")
             if self.on_render is not None:
                 self.on_render(payload)
@@ -290,7 +296,7 @@ class Store:
 - Pushed child result commit: `{node.workspace_result_commit or "not recorded"}`
 - Fetched problem artifact: `{self.problem_artifact or "not recorded"}`
 - Reference snapshot manifest: `{self.reference_manifest or "not recorded"}`
-- Mandatory reference corpora: `TauCeti`, `lean-pool`, `mathlib-internal`
+- Mandatory reference corpora: {", ".join(self.required_references)}
 - Updated: {now()}
 
 ## Statement

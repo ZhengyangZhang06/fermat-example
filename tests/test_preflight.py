@@ -182,7 +182,7 @@ class PreflightTests(unittest.TestCase):
             unresolved=[],
         )
         incomplete = reference_use()[:2]
-        with self.assertRaisesRegex(ValueError, "at least 3 items"):
+        with self.assertRaisesRegex(ValueError, "must contain exactly"):
             NaturalProof(
                 reference_use=incomplete,
                 proof="A sufficiently detailed numbered proof for the fixture.",

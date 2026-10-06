@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .github import GitHubClient, PublicationError, repository_from_url
+from .local_problem import prepare_local_problem
 from .models import Decomposition, LeanAudit, NaturalProof, NodeRecord, SolveResult
 from .runtime import Runtime
 from .status_publisher import StatusPublisher
@@ -26,6 +27,8 @@ class GitHubTheoremRuntime(Runtime):
 
     def __init__(self, agents: Any, task: str, config: Any, state: Any) -> None:
         super().__init__(agents, task, config, state)
+        if config.local_problem:
+            self.store.required_references = ["local-project"]
         self.github = GitHubClient(
             config.github_repository, self.project, self._github_workspace_timeout()
         )
@@ -46,6 +49,36 @@ class GitHubTheoremRuntime(Runtime):
     def _check_workflow_health(self) -> None:
         if self._publication_abort is not None:
             raise self._publication_abort
+
+    def _bootstrap(self):
+        if not self.config.local_problem:
+            return super()._bootstrap()
+        return prepare_local_problem(self)
+
+    def _problem_context(self) -> str:
+        if not self.config.local_problem:
+            return super()._problem_context()
+        return (
+            f"The sole local problem is frozen at `{self.problem_path}`. "
+            f"Its exact declaration is `{self.config.github_root_lean_name}`. "
+            "Do not acquire a Lean-Eval problem or change its hypotheses/conclusion."
+        )
+
+    def _reference_context(self) -> str:
+        if not self.config.local_problem:
+            return super()._reference_context()
+        if self.reference_bundle is None:
+            raise RuntimeError("local references must be prepared before proof work")
+        return (
+            "This run uses a pinned local-project reference snapshot, not the three "
+            "Lean-Eval reference corpora. Network search is disabled. Search this "
+            "snapshot with rg, inspect relevant Lean files, and cite actual paths "
+            "and findings (including no-match results). Fill reference_use with "
+            "exactly one entry whose source is local-project. Snapshot: "
+            f"`{self.reference_bundle.root}`; manifest: "
+            f"`{self.reference_bundle.manifest}`. The project and mathlib revisions "
+            "are recorded there. Reuse requires compatibility and axiom checks."
+        )
 
     @contextmanager
     def _publication_guard(self):
@@ -146,6 +179,7 @@ class GitHubTheoremRuntime(Runtime):
         self.github.request("GET", "")  # Verify API access before expensive proof work.
         context_path = self.run_root / "github-workflow.json"
         identity = {
+            "local_problem": self.config.local_problem,
             "repository": self.github.repository,
             "remote": remote,
             "base_branch": self.config.github_base_branch,
