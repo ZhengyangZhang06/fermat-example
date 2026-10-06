@@ -1,24 +1,32 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>deuring-criterion · Proof status</title><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head>
-<body data-updated="2026-10-06T03:59:12Z" data-lifecycle="running" data-stale-after="1800">
+<body data-updated="2026-10-06T04:09:20Z" data-lifecycle="running" data-stale-after="1800">
 <header><a class="brand" href="../../index.html">◈ Proof status</a><nav><a href="https://github.com/ZhengyangZhang06/fermat-example">ZhengyangZhang06/fermat-example</a><a href="status.json">Status JSON</a></nav></header>
 <main><section class="hero"><div><p class="eyebrow">PROBLEM WORKSPACE</p><h1>deuring-criterion</h1>
 <p class="subtitle">Theorems, dependencies, and evidence for one mathematical problem.</p><p class="run">Run <code>20261006T035907Z-f6caab1a65</code></p></div>
-<div class="snapshot"><span class="badge neutral">Preparing</span>
-<p>Snapshot updated<br><time>2026-10-06T03:59:12Z</time></p><small>Run running · refreshes every minute</small></div></section>
+<div class="snapshot"><span class="badge neutral">In progress</span>
+<p>Snapshot updated<br><time>2026-10-06T04:09:20Z</time></p><small>Run running · refreshes every minute</small></div></section>
 <p id="stale" class="notice" hidden>This running snapshot has not updated recently. The publisher may be offline; check GitHub for the latest evidence.</p>
 
-<section class="metrics" aria-label="Proof progress"><article><span>Verified & integrated</span><strong>0<em> / 0</em></strong></article>
+<section class="metrics" aria-label="Proof progress"><article><span>Verified & integrated</span><strong>0<em> / 1</em></strong></article>
 <article><span>Accepted, integrating</span><strong>0</strong></article>
-<article><span>Awaiting verification</span><strong>0</strong></article>
+<article><span>Awaiting verification</span><strong>1</strong></article>
 <article><span>Solution pull requests</span><strong>0</strong></article></section>
 <section class="progress-panel"><div><b>Proof completion</b><span>0% of active theorems integrated</span></div><progress value="0" max="1">0%</progress>
 <p>Verified proofs and GitHub merges are separate. PR states reflect their last recorded check.</p></section>
 <section class="panel"><div class="panel-head"><div><h2>Theorems & dependencies</h2><p>Expand a theorem to inspect its Lean statement and proof revisions.</p></div>
 <div class="controls"><label class="sr-only" for="search">Search theorems</label><input id="search" type="search" placeholder="Find a theorem…">
 <label class="sr-only" for="filter">Filter theorems</label><select id="filter"><option value="active">Active theorems</option><option value="pending">Awaiting integration</option><option value="verified">Verified</option><option value="all">All decompositions</option></select></div></div>
-<div class="table-scroll"><table><thead><tr><th>Theorem</th><th>Proof status</th><th>Depends on</th><th>Review</th></tr></thead><tbody><tr><td colspan="4" class="empty">Preparing the problem. Theorem records will appear here as work begins.</td></tr></tbody></table></div>
+<div class="table-scroll"><table><thead><tr><th>Theorem</th><th>Proof status</th><th>Depends on</th><th>Review</th></tr></thead><tbody><tr id="node-4813494d137e1631" data-search="root main theorem weierstrasscurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd" data-active="true" data-verified="false">
+<td><div class="theorem" style="--depth:0"><span class="tree-mark" aria-hidden="true">↳</span><div>
+<details><summary>Main theorem</summary>
+<p class="mono">root</p><pre>∀ {k : Type*} [Field k] [IsAlgClosed k] [DecidableEq k] (p : ℕ) [Fact p.Prime] [CharP k p] (W : WeierstrassCurve k) [W.IsElliptic] {β : W.toAffine.Point →+ W.toAffine.Point}, β ∈ WeierstrassCurve.rationalHomSet k W W → ∀ (t q : ℤ), β.comp β + q • AddMonoidHom.id _ = t • β → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → (p : ℤ) ∣ q → ¬ (p : ℤ) ∣ t → ∃ T : W.toAffine.Point, T ≠ 0 ∧ p • T = 0</pre>
+<p>Updated: 2026-10-06T04:08:38Z</p>
+<p class="mono">Candidate: Pending<br>Integrated: Pending</p>
+</details><span class="declaration">WeierstrassCurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd</span></div></div></td>
+<td><span class="badge neutral">natural proof</span><small>Verification pending</small></td>
+<td class="dependencies">None</td><td class="links">— · —<small>PR: not checked<br>Checked: Not yet checked</small></td></tr></tbody></table></div>
 <p id="no-matches" class="empty" hidden>No theorems match this filter.</p></section>
 <details class="contract"><summary>Root Lean problem</summary><pre>∀ {k : Type*} [Field k] [IsAlgClosed k] [DecidableEq k] (p : ℕ) [Fact p.Prime] [CharP k p] (W : WeierstrassCurve k) [W.IsElliptic] {β : W.toAffine.Point →+ W.toAffine.Point}, β ∈ WeierstrassCurve.rationalHomSet k W W → ∀ (t q : ℤ), β.comp β + q • AddMonoidHom.id _ = t • β → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → (p : ℤ) ∣ q → ¬ (p : ℤ) ∣ t → ∃ T : W.toAffine.Point, T ≠ 0 ∧ p • T = 0</pre></details>
 <footer>Only the current dependency graph contributes to completion. Earlier decompositions remain available under “All decompositions”.<br>Generated from the proof workflow’s saved records. No GitHub token is needed by this page.</footer>
