@@ -1,0 +1,31 @@
+github_repository: ZhengyangZhang06/fermat-example
+github_workspace_remote: origin
+github_base_branch: main
+github_root_lean_name: WeierstrassCurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd
+github_root_lean_statement: >-
+  ∀ {k : Type*} [Field k] [IsAlgClosed k] [DecidableEq k]
+  (p : ℕ) [Fact p.Prime] [CharP k p]
+  (W : WeierstrassCurve k) [W.IsElliptic]
+  {β : W.toAffine.Point →+ W.toAffine.Point},
+  β ∈ WeierstrassCurve.rationalHomSet k W W →
+  ∀ (t q : ℤ),
+  β.comp β + q • AddMonoidHom.id _ = t • β →
+  (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) →
+  (p : ℤ) ∣ q → ¬ (p : ℤ) ∣ t →
+  ∃ T : W.toAffine.Point, T ≠ 0 ∧ p • T = 0
+github_contract_file: DeuringCriterionStatement.lean
+github_workspace_branch_prefix: proof-workspace
+github_status_publish: true
+github_status_branch: gh-pages
+github_status_interval: 600
+problem_id: deuring-criterion
+lean_target: Submission.lean
+# Fail closed until the pinned project and exact-contract comparator are restored.
+comparator_command: bash tools/check-with-comparator.sh
+comparator_success: Your solution is okay!
+artifact_dir: .humanize/github-theorem-prover
+max_depth: 3
+max_children: 4
+max_nodes: 48
+max_parallel_children: 4
+rlcr_rounds: 20
