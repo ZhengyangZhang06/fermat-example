@@ -1,5 +1,6 @@
 import Mathlib
 import Definitions.Def_WeierstrassCurve_RationalEnd
+import P2M.Sol.S_WeierstrassCurve_exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd
 
 theorem WeierstrassCurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd
     {k : Type*} [Field k] [IsAlgClosed k] [DecidableEq k]
@@ -13,7 +14,8 @@ theorem WeierstrassCurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_
     (hq : (p : ℤ) ∣ q)
     (ht : ¬ (p : ℤ) ∣ t) :
     ∃ T : W.toAffine.Point, T ≠ 0 ∧ p • T = 0 := by
-  sorry
+  exact P2MW.S_WeierstrassCurve_exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd.solution
+    p W hβ t q hchar hirr hq ht
 
 namespace Submission
 

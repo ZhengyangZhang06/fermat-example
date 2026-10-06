@@ -5,10 +5,16 @@ The accompanying notices are copied from
 They describe that upstream repository's complete contents, not a claim that all
 of its files or web libraries are distributed here.
 
-The experiment currently copies
-[`Definitions/Def_WeierstrassCurve_RationalEnd.lean`](../../Definitions/Def_WeierstrassCurve_RationalEnd.lean)
-unchanged from that revision. Its mathematical problem statement was supplied by
-the user from the same local repository. The additional 46-module upstream proof
-closure is currently an ignored local reference artifact, not a verified solution
-or a published dependency. Any later source reuse must retain provenance and
-these upstream notices.
+The experiment copies the 46-module Deuring proof closure from that revision,
+including `Definitions/Def_WeierstrassCurve_RationalEnd.lean`, unchanged at their
+original module paths. `import-manifest.json` records every Git blob and SHA-256;
+its original reference status is retained as provenance, not a candidate verdict.
+The new root proof in `Submission.lean` applies the upstream solution under the
+experiment's exact frozen declaration. See
+[`root-height-proof.md`](../../proofs/deuring-criterion/root-height-proof.md)
+for the actual height/factorization argument and its validation boundary.
+
+`reference-verification.json` records an earlier diagnostic only. Candidate
+verification and independent review are separate gates; publication and theorem
+acceptance remain the outer controller's responsibility. The original geometric
+G/D/K outline remains historical evidence and is not the implemented route.
