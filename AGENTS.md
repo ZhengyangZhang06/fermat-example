@@ -9,7 +9,11 @@
 - Preserve `DeuringCriterionStatement.lean` exactly; it is the frozen contract.
 - A proof requires exact-contract verification, transitive axiom checking, a prose
   proof, and its own issue and solution PR. Never accept `sorryAx` or added axioms.
-- Do not automatically merge PRs or mark an unverified theorem solved.
+- The user explicitly authorized automatic merging and issue closure on 2026-10-06.
+  Merge only the exact verified publication head after independent review and
+  integration checks; respect branch protection. Close its issue only after a
+  confirmed merge with the verified tree. Never mark an unverified theorem solved.
+  Child PRs merge into their frozen review bases; the root PR integrates into main.
 
 ## Recovered reference material
 
