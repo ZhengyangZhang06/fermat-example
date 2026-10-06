@@ -33,8 +33,6 @@ theorem deuring_finite_kernel_torsion_f6caab1a65
       exact addOrderOf_nsmul_eq_zero a
     exact congrArg (fun x : f.ker => (x : A)) hpa
 
-namespace Submission
-
 /-- A root of an integer monic quadratic without integer roots admits no nonzero
 integer scalar relation, even in a noncommutative ring with zero divisors. -/
 theorem deuring_no_integer_scalar_relation_f6caab1a65 :
