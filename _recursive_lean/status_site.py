@@ -7,6 +7,7 @@ import html
 import json
 import re
 import threading
+import textwrap
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -138,6 +139,76 @@ def public_snapshot(
     }
 
 
+def render_dag(data: dict[str, Any]) -> str:
+    """Accessible, dependency-free SVG; arrows point prerequisite → consumer."""
+    nodes = {n["id"]: n for n in data["nodes"] if n["active"]}
+    if not nodes:
+        return '<section class="panel dag-panel"><p class="empty">The dependency graph will appear when the first theorem is recorded.</p></section>'
+    if not data["graph_ok"]:
+        return '<section class="panel dag-panel"><p class="notice">Dependency graph unavailable: repair the cycle or missing theorem first.</p></section>'
+    levels = {key: 0 for key in nodes}
+    # Bounded relaxation handles shared prerequisites without recursive layout.
+    for _ in nodes:
+        changed = False
+        for key, node in nodes.items():
+            for dependency in node["requires"]:
+                if dependency in nodes and levels[dependency] < levels[key] + 1:
+                    levels[dependency] = levels[key] + 1
+                    changed = True
+        if not changed:
+            break
+    layers = [[key for key in nodes if levels[key] == level]
+              for level in range(max(levels.values()) + 1)]
+    width = max(680, max(map(len, layers)) * 306 + 64)
+    height = len(layers) * 170 + 38
+    positions = {}
+    for level, layer in enumerate(layers):
+        for index, key in enumerate(layer):
+            positions[key] = ((width - len(layer) * 306) / 2 + index * 306 + 18,
+                              28 + level * 170)
+    edges, cards = [], []
+    for key, node in nodes.items():
+        x, y = positions[key]
+        target = anchor(key)
+        for dependency in node["requires"]:
+            if dependency not in positions:
+                continue
+            dx, dy = positions[dependency]
+            middle = (dy + y + 112) / 2
+            edges.append(
+                f'<path class="dag-edge" data-from="{anchor(dependency)}" data-to="{target}" '
+                f'd="M {dx+135} {dy} C {dx+135} {middle}, {x+135} {middle}, {x+135} {y+112}" '
+                'marker-end="url(#dag-arrow)"/>'
+            )
+        tone = ("verified" if node["status"] == "proved" else "failed" if node["status"] == "failed"
+                else "waiting" if node["status"].startswith(("waiting", "queued")) else "working")
+        title = textwrap.wrap(node["title"], width=31, max_lines=2, placeholder="…")
+        title_svg = "".join(f'<tspan x="18" y="{48+i*19}">{html.escape(line)}</tspan>' for i, line in enumerate(title))
+        issue = node["issue_url"].rstrip("/").rsplit("/", 1)[-1]
+        issue_label = f"ISSUE #{issue}" if issue.isdigit() else "THEOREM"
+        status = node["status"].replace("-", " ")
+        cards.append(
+            f'<a class="dag-node {tone}" href="#{target}" data-node="{target}" tabindex="0" '
+            f'aria-label="{html.escape(node["title"]+": "+status+". Open theorem details.", quote=True)}" '
+            f'transform="translate({x},{y})">'
+            f'<title>{html.escape(node["title"])} — {html.escape(node["lean_name"])}</title>'
+            '<rect class="node-card" width="270" height="112" rx="12"/>'
+            f'<text class="node-kicker" x="18" y="22">{issue_label}{" · ROOT" if key == "root" else ""}</text>'
+            f'<text class="node-title">{title_svg}</text>'
+            '<circle class="node-dot" cx="22" cy="92" r="4"/>'
+            f'<text class="node-status" x="34" y="96">{html.escape(status)}</text>'
+            '<text class="node-open" x="242" y="96" aria-hidden="true">↗</text></a>'
+        )
+    return f'''<section class="panel dag-panel" aria-labelledby="dag-heading">
+<div class="panel-head"><div><p class="section-kicker">THE PROOF MAP</p><h2 id="dag-heading">Workflow dependency DAG</h2><p>Prerequisite → dependent. Select a theorem to explore its statement and evidence.</p></div>
+<div class="dag-tools" aria-label="Graph zoom"><button type="button" data-zoom="out" aria-label="Zoom out">−</button><button type="button" data-zoom="reset">Fit</button><button type="button" data-zoom="in" aria-label="Zoom in">+</button></div></div>
+<div class="dag-legend"><span class="legend-verified">Verified</span><span class="legend-working">In progress</span><span class="legend-waiting">Waiting</span><span class="dag-count">{len(nodes)} theorems · {len(edges)} dependencies</span></div>
+<div class="dag-viewport" tabindex="0" aria-label="Scrollable theorem dependency graph"><svg class="dag-svg" viewBox="0 0 {width} {height}" role="group" aria-label="Theorem dependencies">
+<defs><marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>
+<g class="dag-edges">{"".join(edges)}</g><g class="dag-nodes">{"".join(cards)}</g></svg></div>
+<p class="dag-caption">Tracks the experiment’s decomposition and scheduling prerequisites. The final prose proof identifies the lemmas actually used. Verification is distinct from a GitHub merge.</p></section>'''
+
+
 def render_page(data: dict[str, Any]) -> str:
     esc = html.escape
     rows = []
@@ -192,20 +263,21 @@ def render_page(data: dict[str, Any]) -> str:
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(data["problem"])} · Proof status</title><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head>
 <body data-repository="{esc(data["repository"], quote=True)}" data-run="{esc(data["run"], quote=True)}" data-updated="{esc(data["updated_at"], quote=True)}" data-lifecycle="{esc(data["lifecycle"], quote=True)}" data-stale-after="{int(data.get("stale_after_seconds", 1800))}">
-<header><a class="brand" href="../../index.html">◈ Proof status</a><nav>{repo}<a href="status.json">Status JSON</a></nav></header>
-<main><section class="hero"><div><p class="eyebrow">PROBLEM WORKSPACE</p><h1>{esc(data["problem"])}</h1>
-<p class="subtitle">Theorems, dependencies, and evidence for one mathematical problem.</p><p class="run">Run <code>{esc(data["run"])}</code></p></div>
+<header><a class="brand" href="../../index.html"><span class="brand-mark">∴</span> PROOF<span class="brand-light"> / LAB</span></a><nav>{repo}<a href="status.json">Status JSON</a></nav></header>
+<main><section class="hero"><div><p class="eyebrow">LIVE MATHEMATICS WORKSPACE</p><h1>{esc(data["problem"].replace("-", " ").capitalize())}</h1>
+<p class="subtitle">From conjecture to checked proof.<br>Every theorem, dependency, and verification—in one place.</p><p class="run">RUN <code>{esc(data["run"])}</code></p></div>
 <div class="snapshot"><span class="badge {"good" if data["phase"] == "Verified" else "neutral"}">{esc(data["phase"])}</span>
 <p>Snapshot updated<br><time>{esc(data["updated_at"])}</time></p><small>Run {esc(data["lifecycle"])} · refreshes every minute</small></div></section>
 <p id="stale" class="notice" hidden>This running snapshot has not updated recently. The publisher may be offline; check GitHub for the latest evidence.</p>
 {('<p class="notice">The dependency graph has missing nodes or a cycle. Completion cannot be confirmed.</p>' if not data["graph_ok"] else "")}
-{render_activity(data.get("activity"))}
 <section class="metrics" aria-label="Proof progress"><article><span>Verified & integrated</span><strong>{data["verified"]}<em> / {total}</em></strong></article>
 <article><span>Accepted, integrating</span><strong>{data["accepted"] - data["verified"]}</strong></article>
 <article><span>Awaiting verification</span><strong>{total - data["accepted"]}</strong></article>
 <article><span>Solution pull requests</span><strong>{data["pull_requests"]}</strong></article></section>
 <section class="progress-panel"><div><b>Proof completion</b><span>{percent}% of active theorems integrated</span></div><progress value="{data["verified"]}" max="{total or 1}">{percent}%</progress>
 <p>Verified proofs and GitHub merges are separate. PR states reflect their last recorded check.</p></section>
+{render_dag(data)}
+{render_activity(data.get("activity"))}
 <section class="panel"><div class="panel-head"><div><h2>Theorems & dependencies</h2><p>Expand a theorem to inspect its Lean statement and proof revisions.</p></div>
 <div class="controls"><label class="sr-only" for="search">Search theorems</label><input id="search" type="search" placeholder="Find a theorem…">
 <label class="sr-only" for="filter">Filter theorems</label><select id="filter"><option value="active">Active theorems</option><option value="pending">Awaiting integration</option><option value="verified">Verified</option><option value="all">All decompositions</option></select></div></div>
@@ -237,22 +309,23 @@ def render_activity(activity: dict[str, Any] | None) -> str:
     pollers = ""
     if activity.get("pollers"):
         rows = "".join(
-            f"<li><b>{esc(one['id'])}</b>: {esc(one['state'])}"
-            + (f" · issue #{int(one['issue'])}" if one.get("issue") else "")
-            + f" · {int(one['polls'])} polls"
-            + f"<br><small>Last poll: {esc(one.get('last_poll_at') or 'Not yet')}</small></li>"
+            f'<li class="worker-card {"worker-active" if one["state"] == "working" else ""}"><div><b>{esc(one["id"])}</b><span class="worker-dot" aria-hidden="true"></span></div>'
+            + f'<p>{esc(one["state"])}'
+            + (f" · issue #{int(one['issue'])}" if one.get("issue") else " · awaiting work")
+            + f'</p><strong>{int(one["polls"])} <span>polls</span></strong>'
+            + f"<small>Last poll<br>{esc(one.get('last_poll_at') or 'Not yet')}</small></li>"
             for one in activity["pollers"]
         )
-        pollers = f"<h3>Autonomous issue workers ({len(activity['pollers'])})</h3><p>Independent polling on one host; exclusive per-issue locks. Idle workers wait for eligible issues.</p><ul>{rows}</ul>"
+        pollers = f'<h3>Autonomous issue workers ({len(activity["pollers"])})</h3><p class="muted">Independent polling · exclusive issue locks · no push assignments</p><ul class="worker-grid">{rows}</ul>'
     return f"""<section class="panel live-activity" aria-label="Current workflow activity">
-<div class="panel-head"><div><h2>Current activity</h2>
+<div class="panel-head"><div><p class="section-kicker">THE ENGINE ROOM</p><h2>Current activity</h2>
 <p>Observed {esc(activity["observed_at"])} · Controller {esc(activity["controller"])}</p>
 <p>Theorem records last saved {esc(activity["dag_updated_at"])}</p></div></div>
-<div class="activity-body"><h3>Lean dependencies: {esc(build["state"])}</h3>{count}
+<div class="activity-body">{pollers}<details class="build-details"><summary>Lean dependencies: {esc(build["state"])} · build & theorem activity</summary>{count}
 <p>Latest completed module: <code>{esc(build.get("latest_module") or "Not recorded")}</code><br>
 <small>Build log last changed: {esc(build.get("last_activity") or "Not recorded")}</small></p>
 <p>Dependency compilation is setup progress, not mathematical proof completion.</p>
-<ul>{workers}</ul>{pollers}</div></section>"""
+<ul>{workers}</ul></details></div></section>"""
 
 
 def render_catalog(entries: list[dict[str, Any]]) -> str:

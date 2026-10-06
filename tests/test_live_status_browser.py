@@ -30,7 +30,10 @@ class LiveBrowserTests(unittest.TestCase):
         }
         dag = {
             "updated_at": "2020-01-01T00:00:00Z",
-            "nodes": [{"id": "root", "title": "Root theorem", "status": "rlcr-lean"}],
+            "nodes": [
+                {"id": "root", "title": "Root theorem", "status": "rlcr-lean", "children": ["leaf"]},
+                {"id": "leaf", "title": "Prerequisite", "status": "comparing"},
+            ],
         }
         build = {
             "state": "Building",
@@ -89,10 +92,17 @@ class LiveBrowserTests(unittest.TestCase):
             page.route("https://raw.githubusercontent.com/**", serve)
             page.goto("https://owner.github.io/repo/theorem-status/problem/run-one/")
             page.wait_for_selector(".live-activity")
+            page.locator(".build-details summary").click()
             self.assertIn("40 / 100", page.locator(".live-activity").inner_text())
-            page.locator("tbody details summary").click()
+            self.assertEqual(page.locator(".dag-node").count(), 2)
+            self.assertEqual(page.locator(".dag-edge").count(), 1)
+            page.locator('.dag-node').first.click()
+            self.assertTrue(page.locator("tbody details").first.evaluate("element => element.open"))
+            page.locator('[data-zoom="in"]').click()
+            self.assertEqual(page.locator(".dag-svg").evaluate("element => element.style.width"), "125%")
             page.locator("#search").fill("Root")
             build["completed"] = 65
+            dag["nodes"][1]["status"] = "proved"
             feed = live_snapshot(
                 seed, dag, Path(directory), controller_running=True, build=build
             )
@@ -101,12 +111,14 @@ class LiveBrowserTests(unittest.TestCase):
             ).isoformat()
             page.evaluate("poll()")
             self.assertIn("65 / 100", page.locator(".live-activity").inner_text())
+            self.assertEqual(page.locator(".dag-node.verified").count(), 1)
+            self.assertEqual(page.locator(".dag-svg").evaluate("element => element.style.width"), "125%")
             self.assertEqual(page.locator("#search").input_value(), "Root")
             self.assertTrue(
-                page.locator("tbody details").evaluate("element => element.open")
+                page.locator("tbody details").first.evaluate("element => element.open")
             )
             self.assertEqual(
-                page.locator(".metrics strong").first.inner_text(), "0 / 1"
+                page.locator(".metrics strong").first.inner_text(), "1 / 2"
             )
             offline = True
             page.evaluate("poll()")

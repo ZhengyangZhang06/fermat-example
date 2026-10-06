@@ -14,7 +14,7 @@ from test_github_workflow import MemoryGitHub, git
 from _recursive_lean.github import GitHubClient, PublicationError
 from _recursive_lean.runtime import Runtime
 from _recursive_lean.status_publisher import StatusPublisher
-from _recursive_lean.status_site import StatusWebsite, public_snapshot, render_page
+from _recursive_lean.status_site import StatusWebsite, anchor, public_snapshot, render_dag, render_page
 
 
 class PagesAPI(MemoryGitHub):
@@ -54,6 +54,28 @@ class Tags(HTMLParser):
 
 
 class StatusRenderingTests(unittest.TestCase):
+    def test_dag_renders_shared_prerequisites_once_and_orients_edges(self):
+        data = self.snapshot([
+            {"id": "root", "children": ["scalar", "trace", "kernel"]},
+            {"id": "scalar", "status": "proved"},
+            {"id": "trace", "depends_on": ["scalar"], "status": "rlcr-lean"},
+            {"id": "kernel", "status": "proved"},
+            {"id": "obsolete", "status": "proved"},
+        ])
+        graph = render_dag(data)
+        self.assertEqual(graph.count('class="dag-node '), 4)
+        self.assertEqual(graph.count('class="dag-edge"'), 4)
+        self.assertIn(f'data-from="{anchor("scalar")}" data-to="{anchor("trace")}"', graph)
+        self.assertIn(f'href="#{anchor("root")}"', graph)
+        self.assertNotIn(anchor("obsolete"), graph)
+        self.assertIn("lemmas actually used", graph)
+
+    def test_dag_handles_empty_and_invalid_graph_without_recursing(self):
+        self.assertIn("first theorem", render_dag(self.snapshot([])))
+        for nodes in ([{"id": "root", "depends_on": ["root"]}],
+                      [{"id": "root", "children": ["missing"]}]):
+            self.assertIn("graph unavailable", render_dag(self.snapshot(nodes)))
+
     def snapshot(self, nodes):
         return public_snapshot(
             {
