@@ -36,7 +36,11 @@ function bindGraph() {
     node.addEventListener("mouseleave", () => highlight(null));
     node.addEventListener("focus", () => highlight(node.dataset.node));
     node.addEventListener("blur", () => highlight(null));
-    node.addEventListener("click", () => setTimeout(revealTarget, 0));
+    node.addEventListener("click", event => {
+      event.preventDefault();
+      history.replaceState(null, "", node.getAttribute("href"));
+      revealTarget();
+    });
   }
 }
 function applyFilter() {
@@ -94,6 +98,12 @@ function replaceSnapshot(payload) {
   if (Date.parse(data.updated_at) < Date.parse(lastObservation)) return;
   if (data.updated_at === lastObservation && liveConnected) return;
   const parsed = new DOMParser().parseFromString(payload.page, "text/html");
+  // Live HTML may arrive in a tab that still has an older stylesheet.
+  const stylesheet = parsed.querySelector('link[rel="stylesheet"]')?.getAttribute("href");
+  const currentStyle = document.querySelector('link[rel="stylesheet"]');
+  if (/^site-[a-f0-9]{12}\.css$/.test(stylesheet || "") && currentStyle?.getAttribute("href") !== stylesheet) {
+    currentStyle.setAttribute("href", stylesheet);
+  }
   const main = parsed.querySelector("main");
   if (!main || !main.querySelector("#search") || !main.querySelector("#stale")) {
     throw new Error("invalid status document");

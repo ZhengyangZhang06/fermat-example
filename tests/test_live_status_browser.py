@@ -62,8 +62,8 @@ class LiveBrowserTests(unittest.TestCase):
             page.route(
                 "https://owner.github.io/**",
                 lambda route: route.fulfill(
-                    body=(assets / route.request.url.rsplit("/", 1)[-1]).read_text()
-                    if route.request.url.endswith(("site.js", "site.css"))
+                    body=(assets / ("site.js" if route.request.url.endswith(".js") else "site.css")).read_text()
+                    if route.request.url.endswith((".js", ".css"))
                     else page_html,
                     content_type="text/javascript"
                     if route.request.url.endswith(".js")
@@ -137,6 +137,10 @@ class LiveBrowserTests(unittest.TestCase):
                 page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             )
             self.assertEqual(errors, [])
+            # Even a stale tab / failed stylesheet must never get SVG black fills.
+            page.locator('link[rel="stylesheet"]').evaluate_all('links => links.forEach(link => link.remove())')
+            self.assertEqual(page.locator(".dag-edge").first.evaluate('e => getComputedStyle(e).fill'), "none")
+            self.assertNotEqual(page.locator(".node-card").first.evaluate('e => getComputedStyle(e).fill'), "rgb(0, 0, 0)")
             browser.close()
 
 

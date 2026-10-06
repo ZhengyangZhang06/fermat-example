@@ -35,6 +35,11 @@ def anchor(node_id: str) -> str:
     return "node-" + hashlib.sha256(node_id.encode()).hexdigest()[:16]
 
 
+def asset_revision() -> str:
+    assets = Path(__file__).with_name("status_assets")
+    return hashlib.sha256((assets / "site.css").read_bytes() + (assets / "site.js").read_bytes()).hexdigest()[:12]
+
+
 def link(url: str, label: str) -> str:
     clean = safe_url(url)
     return (
@@ -96,6 +101,8 @@ def public_snapshot(
                 "accepted": state == "proved"
                 or (state == "integrating" and bool(node.get("candidate_commit"))),
                 "issue_url": safe_url(node.get("github_issue_url", "")),
+                "issue_state": node.get("github_issue_state", "") or "not checked",
+                "merge_commit": node.get("github_merge_commit", ""),
                 "pr_url": safe_url(node.get("github_pr_url", "")),
                 "pr_state": node.get("github_pr_state", "") or "not checked",
                 "pr_checked_at": node.get("github_pr_checked_at", ""),
@@ -176,7 +183,7 @@ def render_dag(data: dict[str, Any]) -> str:
             dx, dy = positions[dependency]
             middle = (dy + y + 112) / 2
             edges.append(
-                f'<path class="dag-edge" data-from="{anchor(dependency)}" data-to="{target}" '
+                f'<path class="dag-edge" fill="none" stroke="#adbdc8" stroke-width="1.7" data-from="{anchor(dependency)}" data-to="{target}" '
                 f'd="M {dx+135} {dy} C {dx+135} {middle}, {x+135} {middle}, {x+135} {y+112}" '
                 'marker-end="url(#dag-arrow)"/>'
             )
@@ -187,24 +194,30 @@ def render_dag(data: dict[str, Any]) -> str:
         issue = node["issue_url"].rstrip("/").rsplit("/", 1)[-1]
         issue_label = f"ISSUE #{issue}" if issue.isdigit() else "THEOREM"
         status = node["status"].replace("-", " ")
+        fill, stroke, dot = {
+            "verified": ("#ffffff", "#a8d8c6", "#1e9676"),
+            "working": ("#fffdf7", "#d9ba72", "#c89023"),
+            "failed": ("#fff5f5", "#de9292", "#c24545"),
+            "waiting": ("#ffffff", "#cfdde4", "#acb9c4"),
+        }[tone]
         cards.append(
             f'<a class="dag-node {tone}" href="#{target}" data-node="{target}" tabindex="0" '
             f'aria-label="{html.escape(node["title"]+": "+status+". Open theorem details.", quote=True)}" '
             f'transform="translate({x},{y})">'
             f'<title>{html.escape(node["title"])} — {html.escape(node["lean_name"])}</title>'
-            '<rect class="node-card" width="270" height="112" rx="12"/>'
-            f'<text class="node-kicker" x="18" y="22">{issue_label}{" · ROOT" if key == "root" else ""}</text>'
-            f'<text class="node-title">{title_svg}</text>'
-            '<circle class="node-dot" cx="22" cy="92" r="4"/>'
-            f'<text class="node-status" x="34" y="96">{html.escape(status)}</text>'
-            '<text class="node-open" x="242" y="96" aria-hidden="true">↗</text></a>'
+            f'<rect class="node-card" fill="{fill}" stroke="{stroke}" width="270" height="112" rx="12"/>'
+            f'<text class="node-kicker" fill="#6b7c89" font-size="9" x="18" y="22">{issue_label}{" · ROOT" if key == "root" else ""}</text>'
+            f'<text class="node-title" fill="#213744" font-size="13" font-weight="600">{title_svg}</text>'
+            f'<circle class="node-dot" fill="{dot}" cx="22" cy="92" r="4"/>'
+            f'<text class="node-status" fill="#647888" font-size="10" x="34" y="96">{html.escape(status)}</text>'
+            '<text class="node-open" fill="#81959e" x="242" y="96" aria-hidden="true">↗</text></a>'
         )
     return f'''<section class="panel dag-panel" aria-labelledby="dag-heading">
 <div class="panel-head"><div><p class="section-kicker">THE PROOF MAP</p><h2 id="dag-heading">Workflow dependency DAG</h2><p>Prerequisite → dependent. Select a theorem to explore its statement and evidence.</p></div>
 <div class="dag-tools" aria-label="Graph zoom"><button type="button" data-zoom="out" aria-label="Zoom out">−</button><button type="button" data-zoom="reset">Fit</button><button type="button" data-zoom="in" aria-label="Zoom in">+</button></div></div>
 <div class="dag-legend"><span class="legend-verified">Verified</span><span class="legend-working">In progress</span><span class="legend-waiting">Waiting</span><span class="dag-count">{len(nodes)} theorems · {len(edges)} dependencies</span></div>
-<div class="dag-viewport" tabindex="0" aria-label="Scrollable theorem dependency graph"><svg class="dag-svg" viewBox="0 0 {width} {height}" role="group" aria-label="Theorem dependencies">
-<defs><marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>
+<div class="dag-viewport" tabindex="0" aria-label="Scrollable theorem dependency graph"><svg class="dag-svg" width="100%" font-family="system-ui,sans-serif" viewBox="0 0 {width} {height}" role="group" aria-label="Theorem dependencies">
+<defs><marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path fill="#879faa" d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>
 <g class="dag-edges">{"".join(edges)}</g><g class="dag-nodes">{"".join(cards)}</g></svg></div>
 <p class="dag-caption">Tracks the experiment’s decomposition and scheduling prerequisites. The final prose proof identifies the lemmas actually used. Verification is distinct from a GitHub merge.</p></section>'''
 
@@ -248,10 +261,10 @@ def render_page(data: dict[str, Any]) -> str:
 <details><summary>{esc(node["title"])}{archive}</summary>
 <p class="mono">{esc(node["id"])}</p><pre>{esc(node["lean_statement"] or data["statement"])}</pre>
 <p>Updated: {esc(node["updated_at"] or "Pending")}</p>
-<p class="mono">Candidate: {esc(node["candidate_commit"] or "Pending")}<br>Integrated: {esc(node["integrated_commit"] or "Pending")}</p>
+<p class="mono">Candidate: {esc(node["candidate_commit"] or "Pending")}<br>Locally integrated: {esc(node["integrated_commit"] or "Pending")}<br>GitHub merge: {esc(node.get("merge_commit") or "Not merged")}</p>
 </details><span class="declaration">{esc(node["lean_name"])}</span></div></div></td>
 <td><span class="badge {tone}">{esc(label)}</span><small>{esc(evidence)}</small></td>
-<td class="dependencies">{dependencies}</td><td class="links">{links}<small>PR: {esc(node["pr_state"])}<br>Checked: {esc(node["pr_checked_at"] or "Not yet checked")}</small></td></tr>''')
+<td class="dependencies">{dependencies}</td><td class="links">{links}<small>Issue: {esc(node.get("issue_state") or "not checked")} · PR: {esc(node["pr_state"])}<br>Checked: {esc(node["pr_checked_at"] or "Not yet checked")}</small></td></tr>''')
     total = data["total"]
     percent = round(100 * data["verified"] / total) if total else 0
     table = (
@@ -261,7 +274,7 @@ def render_page(data: dict[str, Any]) -> str:
     repo = link(f"https://github.com/{data['repository']}", data["repository"])
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{esc(data["problem"])} · Proof status</title><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head>
+<title>{esc(data["problem"])} · Proof status</title><link rel="stylesheet" href="site-{asset_revision()}.css"><script src="site-{asset_revision()}.js" defer></script></head>
 <body data-repository="{esc(data["repository"], quote=True)}" data-run="{esc(data["run"], quote=True)}" data-updated="{esc(data["updated_at"], quote=True)}" data-lifecycle="{esc(data["lifecycle"], quote=True)}" data-stale-after="{int(data.get("stale_after_seconds", 1800))}">
 <header><a class="brand" href="../../index.html"><span class="brand-mark">∴</span> PROOF<span class="brand-light"> / LAB</span></a><nav>{repo}<a href="status.json">Status JSON</a></nav></header>
 <main><section class="hero"><div><p class="eyebrow">LIVE MATHEMATICS WORKSPACE</p><h1>{esc(data["problem"].replace("-", " ").capitalize())}</h1>
@@ -412,6 +425,8 @@ class StatusWebsite:
                 + "\n",
                 "site.css": (assets / "site.css").read_text(encoding="utf-8"),
                 "site.js": (assets / "site.js").read_text(encoding="utf-8"),
+                f"site-{asset_revision()}.css": (assets / "site.css").read_text(encoding="utf-8"),
+                f"site-{asset_revision()}.js": (assets / "site.js").read_text(encoding="utf-8"),
             }
             for name, content in files.items():
                 atomic_text(self.directory / self.path / name, content)
