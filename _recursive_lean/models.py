@@ -478,13 +478,24 @@ class LeanAudit(ReferenceAware):
     model_config = {"extra": "forbid"}
 
     publication_proof_reviewed: bool = Field(
-        default=False,
         description="For the GitHub root: independently checked the complete committed final prose against the Lean proof, including all assumptions, dependencies and provenance",
     )
     publication_proof_blob: str = Field(
-        default="",
         description="Git blob ID of the reviewed committed root-final-proof.md; empty for workflows that do not require this publication gate",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def read_legacy_publication_fields(cls, value):
+        # Keep the API wire schema fully required. Older durable audits remain
+        # readable, but cannot satisfy the new root publication gate by default.
+        if isinstance(value, dict):
+            return {
+                "publication_proof_reviewed": False,
+                "publication_proof_blob": "",
+                **value,
+            }
+        return value
 
     accepted: bool = Field(
         description="true only if the exact requested theorem is proved without loopholes"

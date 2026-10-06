@@ -274,6 +274,10 @@ class GitHubRuntimeTests(unittest.TestCase):
         self.runtime.store.render()
 
     def test_root_final_prose_requires_review_of_exact_committed_blob(self):
+        schema = LeanAudit.model_json_schema()
+        self.assertEqual(set(schema["required"]), set(schema["properties"]))
+        self.assertNotIn("default", schema["properties"]["publication_proof_reviewed"])
+        self.assertNotIn("default", schema["properties"]["publication_proof_blob"])
         root = self.node("root")
         self.accept(root)
         audit = self.runtime._latest_lean_audit(root)
