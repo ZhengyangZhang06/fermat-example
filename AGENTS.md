@@ -9,7 +9,16 @@
 - Preserve `DeuringCriterionStatement.lean` exactly; it is the frozen contract.
 - A proof requires exact-contract verification, transitive axiom checking, a prose
   proof, and its own issue and solution PR. Never accept `sorryAx` or added axioms.
-- Do not automatically merge PRs or mark an unverified theorem solved.
+- The user explicitly authorized automatic merging and issue closure on 2026-10-06.
+  Merge only the exact verified publication head after independent review and
+  integration checks; respect branch protection. Close its issue only after a
+  confirmed merge with the verified tree. Never mark an unverified theorem solved.
+  Child PRs merge into their frozen review bases; the root PR integrates into main.
+- Final root verification checks the exact root AND every retained child/prerequisite
+  declaration together, including their frozen types and transitive axioms. Preserve
+  each child's original fully qualified name even when the root proof does not use
+  it. Remove duplicated namespace/scaffold artifacts introduced during integration;
+  a root-only passing check is insufficient evidence for the combined delivery.
 
 ## Recovered reference material
 
@@ -21,13 +30,27 @@ been recovered, unchanged, into:
 `/mnt/data/zhengyang-workspace/fermat-example/.humanize/upstream-reference/6e837e75355538c7f80bab5b956861e86c4eacc2`
 
 Its `manifest.json` records each Git blob, content hash, and import. This is
-additional unverified reference material, not part of the frozen proof base and
-not an accepted solution. Do not alter the frozen local-reference snapshot or
-claim these declarations have passed verification. Any reuse needs explicit
-provenance and the existing independent proof/comparator gates. Unchanged
+additional reference material, not part of the frozen proof base and not an
+accepted workflow solution. Do not alter the frozen local-reference snapshot.
+Any reuse needs explicit provenance and the existing independent proof/comparator
+gates. Unchanged
 upstream library declarations are not newly invented helper theorems.
 
-An isolated diagnostic is queued behind the pinned dependency build; its log is
-`.humanize/upstream-verification.log`. Even a successful reference diagnostic does
-not replace this run's theorem issues, reviewed prose, candidate verification,
-independent reviewer, or solution PRs.
+The isolated diagnostic has now passed: all 46 recovered modules compiled, exact
+contract comparison and Lean kernel replay succeeded, and the final declaration
+uses only `propext`, `Classical.choice`, and `Quot.sound`. The challenge differed
+from the original only by renaming its declaration to the upstream name.
+Evidence is recorded in `third_party/fermats-last-theorem/reference-verification.json`;
+local artifacts are `.humanize/upstream-check-kfuym_10` and the diagnostic log is
+`.humanize/upstream-verification.log`. This does not replace this run's theorem
+issues, committed candidate verification, independent reviewer, or solution PRs.
+
+If the root solution reuses this reference, its final natural-language proof must
+describe the actual height/factorization argument and undergo independent review.
+The earlier geometric G/D/K outline is a different proposed route, not evidence
+that those geometric obligations were formalized. Preserve it as historical
+evidence rather than silently changing frozen review artifacts. The operator's
+`.humanize/upstream-route-review.json` is an unreviewed prose reconstruction, not
+an acceptance record. Do not claim unused child lemmas are dependencies of the
+reused proof. Existing upstream lemmas need provenance, not fictitious new-proof
+issues; any genuinely new helper theorem still needs its own issue and PR.

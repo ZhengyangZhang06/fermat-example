@@ -1,0 +1,34 @@
+{
+  "reference_use": [
+    {
+      "source": "local-project",
+      "queries": [
+        "rg -n 'exists_ne_zero_and_char_nsmul|DeuringOrd' /mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project --glob '*.lean'",
+        "rg -n 'DeuringOrd|exists_mulP_core|HasHeight' /mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project --glob '*.lean'"
+      ],
+      "files": [
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/manifest.json",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project/DeuringCriterionStatement.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project/Submission.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project/Definitions/Def_WeierstrassCurve_RationalEnd.lean",
+        "third_party/fermats-last-theorem/import-manifest.json"
+      ],
+      "conclusion": "The snapshot supplies the exact contract and rationality definition; its Submission contains only the original placeholder. No height-route declarations matched the second search. All 46 authorized upstream modules match their recorded blobs, SHA-256 hashes, and recovered source bytes. Independent verification passed on Lean 4.33.1 with pinned mathlib db584cd6d46c92f209a44c0f1c829460d327499d, including exact root and child contracts, kernel replay, and only the three permitted axioms. Evidence: verification/root-rjm59jln."
+    }
+  ],
+  "publication_proof_reviewed": true,
+  "publication_proof_blob": "1c0099cb85da4e4edc3a866bbb678399ec4662fb",
+  "accepted": true,
+  "comparator_reran": true,
+  "comparator_passed": true,
+  "proof_matches_statement": true,
+  "issues": [],
+  "theorems": [
+    {
+      "name": "WeierstrassCurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd",
+      "statement": "∀ {k : Type*} [Field k] [IsAlgClosed k] [DecidableEq k] (p : ℕ) [Fact p.Prime] [CharP k p] (W : WeierstrassCurve k) [W.IsElliptic] {β : W.toAffine.Point →+ W.toAffine.Point}, β ∈ WeierstrassCurve.rationalHomSet k W W → ∀ (t q : ℤ), β.comp β + q • AddMonoidHom.id _ = t • β → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → (p : ℤ) ∣ q → ¬ (p : ℤ) ∣ t → ∃ T : W.toAffine.Point, T ≠ 0 ∧ p • T = 0",
+      "lean_file": "Submission.lean",
+      "natural_summary": "Reuses the explicitly attributed upstream height proof. Assuming trivial p-torsion, height additivity lets either β or [t]−β factor its square rationally through [p]. Bézout produces rational p-division, and dual trace identities force a nonzero integer scalar relation, contradicting the absence of integer roots. The committed prose matches this argument; the three preserved historical children are unused."
+    }
+  ]
+}

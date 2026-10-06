@@ -1,0 +1,33 @@
+{
+  "reference_use": [
+    {
+      "source": "local-project",
+      "queries": [
+        "rg -n 'deuring_trace_norm_unique|deuring_no_integer_scalar_relation' /mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project",
+        "rg -n 'den_pow|sub_intCast_den|mul_den_dvd|coe_int_num_of_den_eq_one' /mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/Data/Rat"
+      ],
+      "files": [
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/manifest.json",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project/Submission.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/Data/Rat/Lemmas.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/Data/Rat/Defs.lean"
+      ],
+      "conclusion": "No matching node declarations occur in the project snapshot. The inspected rational-number lemmas justify denominator divisibility, invariance under subtracting integers, and integrality when the denominator is one. The manifest pins project 9d6f2efe18bb6dd0747b7e00cae619ebb8cbe50b and mathlib db584cd6d46c92f209a44c0f1c829460d327499d. My exact comparator rerun exited zero with 'Your solution is okay!' and reported only propext, Classical.choice, and Quot.sound. Evidence: verification/root-trace_norm_uniqueness-a1-bcx1h4p4. The frozen contract and root placeholder are preserved; the existing scalar-relation theorem matches its approved dependency history."
+    }
+  ],
+  "publication_proof_reviewed": false,
+  "publication_proof_blob": "",
+  "accepted": true,
+  "comparator_reran": true,
+  "comparator_passed": true,
+  "proof_matches_statement": true,
+  "issues": [],
+  "theorems": [
+    {
+      "name": "Submission.deuring_trace_norm_unique_f6caab1a65",
+      "statement": "∀ {R : Type*} [Ring R] [CharZero R] (f g : R) (t q d e : ℤ), f * g = (d : R) → (1 - f) * (1 - g) = (e : R) → f ^ 2 - (t : R) * f + (q : R) = 0 → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → f + g = (t : R) ∧ d = q",
+      "lean_file": "Submission.lean",
+      "natural_summary": "Expanding the product identities gives f+g=s for s=1+d−e. Centrality of integer casts yields a second quadratic relation, hence (s−t)f=d−q. If s≠t, scaling the original quadratic and using faithful integer casting produces the rational root (d−q)/(s−t). Its denominator squared divides its denominator, so it is an integer, contradicting the hypothesis. Thus s=t, and faithful integer casting then gives d=q."
+    }
+  ]
+}

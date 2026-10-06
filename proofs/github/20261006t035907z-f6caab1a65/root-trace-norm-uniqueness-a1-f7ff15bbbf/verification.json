@@ -1,0 +1,16 @@
+{
+  "node_id": "root.trace_norm_uniqueness-a1",
+  "issue": "https://github.com/ZhengyangZhang06/fermat-example/issues/3",
+  "solution_pr": "https://github.com/ZhengyangZhang06/fermat-example/pull/7",
+  "candidate_commit": "f9beccd436bfae299a3decebe427684e1ee12ff6",
+  "integrated_commit": "2894629ef96007c07444fe9c413408ad8fd6d8bc",
+  "proof_base_commit": "f0dfd5b77fe8cdaca1069daa98b4cd652163528a",
+  "comparator_command": "/home/ubuntu/.local/bin/python3.12 /mnt/data/zhengyang-workspace/fermat-example/tools/verify-node.py",
+  "required_success_marker": "Your solution is okay!",
+  "machine_comparator_passed": true,
+  "reviewer_comparator_passed": true,
+  "parent": "root",
+  "requires": [
+    "root.no_integer_scalar_relation-a1"
+  ]
+}

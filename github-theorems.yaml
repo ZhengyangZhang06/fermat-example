@@ -1,4 +1,9 @@
 github_repository: ZhengyangZhang06/fermat-example
+github_worker_mode: poll
+github_issue_workers: 8
+github_issue_poll_interval: 30
+github_auto_merge: true
+github_close_proved_issues: true
 local_problem: true
 github_workspace_remote: origin
 github_base_branch: main

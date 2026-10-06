@@ -1,0 +1,34 @@
+{
+  "reference_use": [
+    {
+      "source": "local-project",
+      "queries": [
+        "exists_prime_orderOf_dvd_card|exists_prime_addOrderOf_dvd_card|finite_kernel_torsion|deuring_finite_kernel_torsion",
+        "addOrderOf_nsmul_eq_zero|addOrderOf_zero",
+        "deuring_finite_kernel_torsion_f6caab1a65|finite_kernel_torsion"
+      ],
+      "files": [
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/manifest.json",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/GroupTheory/Perm/Cycle/Type.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/GroupTheory/OrderOfElement.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/Algebra/CharP/CharAndCard.lean"
+      ],
+      "conclusion": "Found additive Cauchy's theorem, its rotation-counting proof, and the additive-order annihilation lemma. These three Lean files match the verifier's pinned dependency byte-for-byte. No existing node-specific theorem matched the final search. After supplying the missing ambient HUMANIZE_NODE_ID=root.finite_kernel_torsion-a1, the exact comparator command exited 0 with 'Your solution is okay!'; transitive axioms were only propext, Classical.choice, and Quot.sound. The diff adds only the tracked theorem; the frozen root placeholder, challenge, and imports are preserved."
+    }
+  ],
+  "publication_proof_reviewed": false,
+  "publication_proof_blob": "",
+  "accepted": true,
+  "comparator_reran": true,
+  "comparator_passed": true,
+  "proof_matches_statement": true,
+  "issues": [],
+  "theorems": [
+    {
+      "name": "Submission.deuring_finite_kernel_torsion_f6caab1a65",
+      "statement": "∀ {A : Type*} [AddCommGroup A] (f : A →+ A) [Fintype f.ker] (p : ℕ) [Fact p.Prime], p ∣ Fintype.card f.ker → ∃ a : A, a ≠ 0 ∧ f a = 0 ∧ p • a = 0",
+      "lean_file": "Submission.lean",
+      "natural_summary": "Apply additive Cauchy's theorem to the finite kernel to obtain an element of additive order p. It is nonzero because zero has order one and p is prime. Kernel membership gives f(a)=0, and inclusion into A carries its p-fold sum to zero."
+    }
+  ]
+}

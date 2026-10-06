@@ -1,0 +1,615 @@
+{
+  "status": "unverified reference only; not a candidate proof",
+  "source": "/mnt/data/zhengyang-workspace/fermats-last-theorem",
+  "revision": "6e837e75355538c7f80bab5b956861e86c4eacc2",
+  "root_module": "P2M.Sol.S_WeierstrassCurve_exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd",
+  "modules": {
+    "P2M.Sol.S_WeierstrassCurve_exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd": {
+      "path": "P2M/Sol/S_WeierstrassCurve_exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd.lean",
+      "git_blob": "1582ea45351c8a960f3dce72c88bf9d1f3775301",
+      "sha256": "f2ffa67c4bff3b5a5a70d287b650312a8d450d3645aecd658db6d6793f0ee55f",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Definitions.Def_DualIsogenyAPI",
+        "Theorems.Thm_Polynomial_isCoprime_and_wronskian_ne_zero_comp_of_wronskian_ne_zero",
+        "Theorems.Thm_WeierstrassCurve_exists_xCoord_rep_of_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_natDegree_lt_of_xCoord_rep",
+        "Theorems.Thm_WeierstrassCurve_comp_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_add_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_surjective_of_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_Psi2Sq_mul_wronskian_sq",
+        "Theorems.Thm_WeierstrassCurve_isCoprime_Phi_PsiSq",
+        "Theorems.Thm_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div",
+        "Theorems.Thm_WeierstrassCurve_Affine_evalEval_psi_sq",
+        "Theorems.Thm_WeierstrassCurve_exists_mem_rationalHomSet_comp_eq_of_ker_le_of_xCoord_expand",
+        "Theorems.Thm_WeierstrassCurve_exists_mem_rationalHomSet_isDualPair_and_add_eq_smul_id",
+        "P2M.Util"
+      ]
+    },
+    "P2M.Util": {
+      "path": "P2M/Util.lean",
+      "git_blob": "0a73367f78bc165bb5d35e42ca14f5055252e7f6",
+      "sha256": "66f62069b83c0cf97531f88e5bd2c249e471df011ad873b0bd034eb959b1d8da",
+      "imports": [
+        "Lean"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_exists_mem_rationalHomSet_isDualPair_and_add_eq_smul_id": {
+      "path": "Theorems/Thm_WeierstrassCurve_exists_mem_rationalHomSet_isDualPair_and_add_eq_smul_id.lean",
+      "git_blob": "52ebd4c7698ac07338c79df1520c84dadee200b9",
+      "sha256": "99ef2455e039f583109e98423cb5c95d83b8fe1461a64c13fd615e8a83be41b7",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Definitions.Def_DualIsogenyAPI",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_exists_mem_rationalHomSet_isDualPair_and_add_eq_smul_id"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_exists_mem_rationalHomSet_isDualPair_and_add_eq_smul_id": {
+      "path": "P2M/Sol/S_WeierstrassCurve_exists_mem_rationalHomSet_isDualPair_and_add_eq_smul_id.lean",
+      "git_blob": "46340a27410f6372ec96aab33f1091ee3e73f165",
+      "sha256": "adab67e099cc17d118ba31e09f9afcec9628bbe9a5913f6bd4e2e5840de92b91",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Definitions.Def_DualIsogenyAPI",
+        "Theorems.Thm_WeierstrassCurve_dualIsogenyExistence_rationalEndSubring",
+        "Theorems.Thm_WeierstrassCurve_surjective_of_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_add_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_comp_mem_rationalHomSet",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_comp_mem_rationalHomSet": {
+      "path": "Theorems/Thm_WeierstrassCurve_comp_mem_rationalHomSet.lean",
+      "git_blob": "4604ae3b55cfa27d20dad58be2ab72ba8785962c",
+      "sha256": "82d328239e38c998919dc85bce9c02710adedaae7b11ebf352f38146f89c03f4",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_comp_mem_rationalHomSet"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_comp_mem_rationalHomSet": {
+      "path": "P2M/Sol/S_WeierstrassCurve_comp_mem_rationalHomSet.lean",
+      "git_blob": "9c87ded837c2175b5089e014cf0ea2f6b5dbd246",
+      "sha256": "d337162bebb7421b7dbf8a1807db23584a2cfb229eb7cba0ad2368e2dd1231f6",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util"
+      ]
+    },
+    "Definitions.Def_WeierstrassCurve_RationalEnd": {
+      "path": "Definitions/Def_WeierstrassCurve_RationalEnd.lean",
+      "git_blob": "21a1df1e1924b1ed06d091db5601a220f2d99a4f",
+      "sha256": "89e12f9a7a6b7f87b4c543df86e898d5975f71f44b5cf777de688a650b72a53b",
+      "imports": [
+        "Mathlib"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_add_mem_rationalHomSet": {
+      "path": "Theorems/Thm_WeierstrassCurve_add_mem_rationalHomSet.lean",
+      "git_blob": "1168995935c2c509ed0a5b3d8aea8b59efeafb6b",
+      "sha256": "3d934e74ea45e8d806f893cece4cf6376431cff7583646ace122dbde9db9ffa2",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_add_mem_rationalHomSet"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_add_mem_rationalHomSet": {
+      "path": "P2M/Sol/S_WeierstrassCurve_add_mem_rationalHomSet.lean",
+      "git_blob": "4bfc591d74d673f11c41886e8de4353043f20df1",
+      "sha256": "b44da9750e4563adf4e22efbf486199953b3f589dc59662b9f798f49b21dcbc1",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_surjective_of_mem_rationalHomSet": {
+      "path": "Theorems/Thm_WeierstrassCurve_surjective_of_mem_rationalHomSet.lean",
+      "git_blob": "e15bed0e52f8e6e6ee80572695fa77c7d83bd871",
+      "sha256": "27385689bd6a7e349c17a34bfd9f63b2e282967b6b4fe51a599945b93b0b7707",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_surjective_of_mem_rationalHomSet"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_surjective_of_mem_rationalHomSet": {
+      "path": "P2M/Sol/S_WeierstrassCurve_surjective_of_mem_rationalHomSet.lean",
+      "git_blob": "a6561c07eae6a29fa5dc391782fab334d3dae16a",
+      "sha256": "35a679f6a14439f2c2740c1e54f7cd80b8a9b91e0c1d22c80146ff537e803abe",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_dualIsogenyExistence_rationalEndSubring": {
+      "path": "Theorems/Thm_WeierstrassCurve_dualIsogenyExistence_rationalEndSubring.lean",
+      "git_blob": "d72b1386b044397b0adbb0292b57b5df26b3d210",
+      "sha256": "a639b6452ab0dec1c43e7d44b3cbdda71825cffdf5a2b1236572e657c1939b36",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Definitions.Def_DualIsogenyAPI",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_dualIsogenyExistence_rationalEndSubring"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_dualIsogenyExistence_rationalEndSubring": {
+      "path": "P2M/Sol/S_WeierstrassCurve_dualIsogenyExistence_rationalEndSubring.lean",
+      "git_blob": "6406b2dcbb862a6a335a847d6cb70255f1bbe28c",
+      "sha256": "06ed62b499ffa8c3d355dbcba99a1a9d5b71f02addebb35a94962fcfb280f74d",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Definitions.Def_DualIsogenyAPI",
+        "Theorems.Thm_WeierstrassCurve_add_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_comp_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_exists_xCoord_rep_of_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_natDegree_lt_of_xCoord_rep",
+        "Theorems.Thm_WeierstrassCurve_exists_xCoord_rep_comp",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_natDegree_parallelogram_law",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div",
+        "Theorems.Thm_WeierstrassCurve_isCoprime_Phi_PsiSq",
+        "Theorems.Thm_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic": {
+      "path": "Theorems/Thm_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic.lean",
+      "git_blob": "08244956ca275cc14ccfd160a4e6d79b337fee9f",
+      "sha256": "c92c23449b64f60887f8991de860699a87624c5f2e85615e13884dbb68958e4d",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic": {
+      "path": "P2M/Sol/S_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic.lean",
+      "git_blob": "daa9d997bf998722da602a3d84078932dfa79b7b",
+      "sha256": "d2ee2a85c4e8daba254a0ac70f37d4f143b34caf1a94e5e8e89275157f87e517",
+      "imports": [
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic",
+        "Mathlib.Tactic.LinearCombination",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_isCoprime_Phi_PsiSq": {
+      "path": "Theorems/Thm_WeierstrassCurve_isCoprime_Phi_PsiSq.lean",
+      "git_blob": "83bbdc0c6d2aa050a0631bcc4c3a782cad939309",
+      "sha256": "10e90ba76e1ca5ea52707f4c691d365a348b5a052d625bd6519c1d15707a977e",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_isCoprime_Phi_PsiSq"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_isCoprime_Phi_PsiSq": {
+      "path": "P2M/Sol/S_WeierstrassCurve_isCoprime_Phi_PsiSq.lean",
+      "git_blob": "36799840f8ca8743d4b3fbc2ecbc452bf6a07d75",
+      "sha256": "f95fa87bfbb4accc82746662e8e60dab5c004199533118994794fb07503e73b6",
+      "imports": [
+        "Mathlib.NumberTheory.EllipticDivisibilitySequence",
+        "Mathlib.Algebra.Ring.NegOnePow",
+        "Mathlib.Data.Fin.VecNotation",
+        "Mathlib.Data.Fin.Tuple.Sort",
+        "Mathlib.Algebra.GroupWithZero.NonZeroDivisors",
+        "Mathlib.Algebra.MvPolynomial.CommRing",
+        "Mathlib.Algebra.MvPolynomial.Basic",
+        "Mathlib.Tactic.LinearCombination",
+        "Mathlib.Tactic.Ring",
+        "Mathlib.Tactic.Abel",
+        "Mathlib.Tactic.IntervalCases",
+        "Mathlib.Tactic.FieldSimp",
+        "Mathlib.GroupTheory.Perm.Basic",
+        "Mathlib.GroupTheory.Perm.Sign",
+        "Mathlib.GroupTheory.Perm.Cycle.Type",
+        "Mathlib.Algebra.Polynomial.Bivariate",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Jacobian.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Degree",
+        "Mathlib.FieldTheory.IsAlgClosed.Basic",
+        "Mathlib.FieldTheory.Separable",
+        "Mathlib.Data.Nat.Factorization.Induction",
+        "Mathlib.Logic.Embedding.Set",
+        "Mathlib.SetTheory.Cardinal.Finite",
+        "Mathlib.Data.Set.Card",
+        "Mathlib.Algebra.Module.Torsion.Basic",
+        "Mathlib.FieldTheory.IsAlgClosed.AlgebraicClosure",
+        "Definitions.Def_WeierstrassCurve_EDSEngine",
+        "P2M.Util"
+      ]
+    },
+    "Definitions.Def_WeierstrassCurve_EDSEngine": {
+      "path": "Definitions/Def_WeierstrassCurve_EDSEngine.lean",
+      "git_blob": "1baedebf5d82fbcf4a1d543f7a7582ac96edcfc5",
+      "sha256": "4947ab0923d7c6b1b3a82cc971e843c10edbb3acb2df2791234dae8289b572d2",
+      "imports": [
+        "Mathlib.NumberTheory.EllipticDivisibilitySequence",
+        "Definitions.Def_Compat_Mathlib430",
+        "Mathlib.Algebra.Ring.NegOnePow",
+        "Mathlib.Data.Fin.VecNotation",
+        "Mathlib.Data.Fin.Tuple.Sort",
+        "Mathlib.Algebra.GroupWithZero.NonZeroDivisors",
+        "Mathlib.Algebra.MvPolynomial.CommRing",
+        "Mathlib.Algebra.MvPolynomial.Basic",
+        "Mathlib.Tactic.LinearCombination",
+        "Mathlib.Tactic.Ring",
+        "Mathlib.Tactic.Abel",
+        "Mathlib.Tactic.IntervalCases",
+        "Mathlib.Tactic.FieldSimp",
+        "Mathlib.GroupTheory.Perm.Basic",
+        "Mathlib.GroupTheory.Perm.Sign",
+        "Mathlib.GroupTheory.Perm.Cycle.Type",
+        "Mathlib.Algebra.Polynomial.Bivariate",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Jacobian.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Degree",
+        "Mathlib.FieldTheory.IsAlgClosed.Basic",
+        "Mathlib.FieldTheory.Separable",
+        "Mathlib.Data.Nat.Factorization.Induction",
+        "Mathlib.Logic.Embedding.Set",
+        "Mathlib.SetTheory.Cardinal.Finite",
+        "Mathlib.Data.Set.Card",
+        "Mathlib.Algebra.Module.Torsion.Basic"
+      ]
+    },
+    "Definitions.Def_Compat_Mathlib430": {
+      "path": "Definitions/Def_Compat_Mathlib430.lean",
+      "git_blob": "223d485d38257f10578cc48c37a733df666c1e08",
+      "sha256": "0d80c765130229fcd9bbeb5b234bfc4af5afaff2354b56ae0acc90e04b8b8e54",
+      "imports": [
+        "Mathlib.RepresentationTheory.Rep.Basic",
+        "Mathlib.Algebra.Group.End",
+        "Mathlib.Algebra.GroupWithZero.Action.Basic",
+        "Mathlib.Algebra.Ring.AddAut",
+        "Mathlib.Algebra.Ring.Action.Submonoid",
+        "Mathlib.NumberTheory.RamificationInertia.Galois",
+        "Mathlib.RingTheory.Invariant.Galois",
+        "Mathlib.FieldTheory.Galois.Basic",
+        "Mathlib.Tactic.LinearCombination",
+        "Mathlib.Tactic.Ring"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div": {
+      "path": "Theorems/Thm_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div.lean",
+      "git_blob": "b594f281671193b35e47d7f78251c0c174deffb6",
+      "sha256": "be92483a2f52c469468e3f43895b8f0e849810f21dc21766a66733dd3fb073fd",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div": {
+      "path": "P2M/Sol/S_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div.lean",
+      "git_blob": "bea65fbc53e39a8432db1e9b21f4544a8cc58cf8",
+      "sha256": "0d368d96dcd45f1ce2f5e4dd7ae78d6f4b6ca946843b2d785315a3e2b91e00d1",
+      "imports": [
+        "Definitions.Def_WeierstrassCurve_EDSEngine",
+        "Mathlib.NumberTheory.EllipticDivisibilitySequence",
+        "Mathlib.Algebra.Ring.NegOnePow",
+        "Mathlib.Data.Fin.VecNotation",
+        "Mathlib.Data.Fin.Tuple.Sort",
+        "Mathlib.Algebra.GroupWithZero.NonZeroDivisors",
+        "Mathlib.Algebra.MvPolynomial.CommRing",
+        "Mathlib.Algebra.MvPolynomial.Basic",
+        "Mathlib.Tactic.LinearCombination",
+        "Mathlib.Tactic.Ring",
+        "Mathlib.Tactic.Abel",
+        "Mathlib.Tactic.IntervalCases",
+        "Mathlib.Tactic.FieldSimp",
+        "Mathlib.GroupTheory.Perm.Basic",
+        "Mathlib.GroupTheory.Perm.Sign",
+        "Mathlib.GroupTheory.Perm.Cycle.Type",
+        "Mathlib.Algebra.Polynomial.Bivariate",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Jacobian.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Degree",
+        "Mathlib.FieldTheory.IsAlgClosed.Basic",
+        "Mathlib.FieldTheory.Separable",
+        "Mathlib.Data.Nat.Factorization.Induction",
+        "Mathlib.Logic.Embedding.Set",
+        "Mathlib.SetTheory.Cardinal.Finite",
+        "Mathlib.Data.Set.Card",
+        "Mathlib.Algebra.Module.Torsion.Basic",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_Affine_Point_natDegree_parallelogram_law": {
+      "path": "Theorems/Thm_WeierstrassCurve_Affine_Point_natDegree_parallelogram_law.lean",
+      "git_blob": "08a164b5e2a5a86e35800feb8c6b2229b3003b25",
+      "sha256": "338e4b9d12a148a7b8d8b18d72efcd7c5927a2a0953bf03a5aa7d15ecd7397d4",
+      "imports": [
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point",
+        "Mathlib.FieldTheory.IsAlgClosed.Basic",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_Affine_Point_natDegree_parallelogram_law"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_Affine_Point_natDegree_parallelogram_law": {
+      "path": "P2M/Sol/S_WeierstrassCurve_Affine_Point_natDegree_parallelogram_law.lean",
+      "git_blob": "07ba7d0940fbd7f0749b09eac28055ff666d1977",
+      "sha256": "e078448765fa8335298ae1d46c8efaf98e4d848e763a7499b97b421a245a4690",
+      "imports": [
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point",
+        "Mathlib.FieldTheory.IsAlgClosed.Basic",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_exists_xCoord_rep_comp": {
+      "path": "Theorems/Thm_WeierstrassCurve_exists_xCoord_rep_comp.lean",
+      "git_blob": "e05a363037dc57f44627a50b45add2d4226716d8",
+      "sha256": "45bfed3fae4167d6883aadf4c1533b3e70fe6fca7fa3dec7f998316a64aa5ce7",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_exists_xCoord_rep_comp"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_exists_xCoord_rep_comp": {
+      "path": "P2M/Sol/S_WeierstrassCurve_exists_xCoord_rep_comp.lean",
+      "git_blob": "8c85b5064cf4e674f2076f3f995b00ba3a2fcfd0",
+      "sha256": "9ba990ed0f2955bd769dda7f78a726bf2f4659b5bf315795b7af94708638c883",
+      "imports": [
+        "Mathlib",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_natDegree_lt_of_xCoord_rep": {
+      "path": "Theorems/Thm_WeierstrassCurve_natDegree_lt_of_xCoord_rep.lean",
+      "git_blob": "54bd2330e271bbccd3832b25799f2fca02474acd",
+      "sha256": "e67d0db75d490e18bd64ce70770805f0400fb3a1831df7194779837045bfa786",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_natDegree_lt_of_xCoord_rep"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_natDegree_lt_of_xCoord_rep": {
+      "path": "P2M/Sol/S_WeierstrassCurve_natDegree_lt_of_xCoord_rep.lean",
+      "git_blob": "3fd95dc4ee3e4a46d10fcdb3b67c570bfb8dc7cf",
+      "sha256": "f5dd6ecb8b97b97636c03c7c23dff9edbab3d59664e81d6d9ef577f6a3f52a5d",
+      "imports": [
+        "Mathlib",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_nsmul_some_eq_zero_iff_eval_prePsi",
+        "Theorems.Thm_WeierstrassCurve_isCoprime_Phi_PsiSq",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_Affine_Point_nsmul_some_eq_zero_iff_eval_prePsi": {
+      "path": "Theorems/Thm_WeierstrassCurve_Affine_Point_nsmul_some_eq_zero_iff_eval_prePsi.lean",
+      "git_blob": "d3877ffbe84c72af147b1f78e4579a188ef529ab",
+      "sha256": "7d893cc1272db82bff1c2dd87f719ff082f0f24b74c9b912c2ee9c4b2328285c",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_Affine_Point_nsmul_some_eq_zero_iff_eval_prePsi"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_Affine_Point_nsmul_some_eq_zero_iff_eval_prePsi": {
+      "path": "P2M/Sol/S_WeierstrassCurve_Affine_Point_nsmul_some_eq_zero_iff_eval_prePsi.lean",
+      "git_blob": "a1ba940f76c2ba59748475b839e1bb20d1fbc116",
+      "sha256": "cc114382783a8d7553fab9be01990b7682f6cd76e370a291ed76cf1fcac38ca7",
+      "imports": [
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff": {
+      "path": "Theorems/Thm_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff.lean",
+      "git_blob": "8c28fe9d7b96d256c47d841e3e244e68452f2851",
+      "sha256": "375b96868f786fbedcb104cbb731cc63c379fbf4edcd9290b36259b0e0e52064",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff": {
+      "path": "P2M/Sol/S_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff.lean",
+      "git_blob": "5ac92645c81846438891fe1c002b42f5bb870d05",
+      "sha256": "e611244287dca84cacd543c3eff1c4ede597f38e3809d8d04ae0b6e3e9126108",
+      "imports": [
+        "Mathlib.NumberTheory.EllipticDivisibilitySequence",
+        "Mathlib.Algebra.Ring.NegOnePow",
+        "Mathlib.Data.Fin.VecNotation",
+        "Mathlib.Data.Fin.Tuple.Sort",
+        "Mathlib.Algebra.GroupWithZero.NonZeroDivisors",
+        "Mathlib.Algebra.MvPolynomial.CommRing",
+        "Mathlib.Algebra.MvPolynomial.Basic",
+        "Mathlib.Tactic.LinearCombination",
+        "Mathlib.Tactic.Ring",
+        "Mathlib.Tactic.Abel",
+        "Mathlib.Tactic.IntervalCases",
+        "Mathlib.Tactic.FieldSimp",
+        "Mathlib.GroupTheory.Perm.Basic",
+        "Mathlib.GroupTheory.Perm.Sign",
+        "Mathlib.Algebra.Polynomial.Bivariate",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.Jacobian.Point",
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic",
+        "Definitions.Def_WeierstrassCurve_EDSEngine",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_exists_xCoord_rep_of_mem_rationalHomSet": {
+      "path": "Theorems/Thm_WeierstrassCurve_exists_xCoord_rep_of_mem_rationalHomSet.lean",
+      "git_blob": "884c638692ef474a6a9c00488a58ec2b044cecde",
+      "sha256": "c9671d4e0cf0bf2384f18fc1ab72589b56a4bc9fa5f23f44cf29ae988c806e0f",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_exists_xCoord_rep_of_mem_rationalHomSet"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_exists_xCoord_rep_of_mem_rationalHomSet": {
+      "path": "P2M/Sol/S_WeierstrassCurve_exists_xCoord_rep_of_mem_rationalHomSet.lean",
+      "git_blob": "1bf2eebf1d1a0cef807f3eeea549f4518da46ec6",
+      "sha256": "c44ecc25b19e02ed1fe938fcdcd62b9f26edb7df447fcc4aae667770656c5c43",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Theorems.Thm_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic",
+        "P2M.Util"
+      ]
+    },
+    "Definitions.Def_DualIsogenyAPI": {
+      "path": "Definitions/Def_DualIsogenyAPI.lean",
+      "git_blob": "3fbc6a62a3baa8fa1c20e1b50bcce3712ecc4051",
+      "sha256": "e1834edc4581bc38534ad896e66fd7fa8738eda400376d4e7f7d5fd03daa434d",
+      "imports": [
+        "Mathlib"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_exists_mem_rationalHomSet_comp_eq_of_ker_le_of_xCoord_expand": {
+      "path": "Theorems/Thm_WeierstrassCurve_exists_mem_rationalHomSet_comp_eq_of_ker_le_of_xCoord_expand.lean",
+      "git_blob": "c97c1f87326771b45e82bb1ac41e091b83e17cbb",
+      "sha256": "9f0db700dbc9dd60332ebe052f0601993068a29c56fa0d70cde1775f5149eb34",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_exists_mem_rationalHomSet_comp_eq_of_ker_le_of_xCoord_expand"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_exists_mem_rationalHomSet_comp_eq_of_ker_le_of_xCoord_expand": {
+      "path": "P2M/Sol/S_WeierstrassCurve_exists_mem_rationalHomSet_comp_eq_of_ker_le_of_xCoord_expand.lean",
+      "git_blob": "b482d1e756ad01b1b8e35caf7f83854f8c7060d3",
+      "sha256": "219f5c3086ae0b1830a72d78e151f11bc17c623be58f3164b51e6fb05604f0db",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Theorems.Thm_Polynomial_isCoprime_and_wronskian_ne_zero_comp_of_wronskian_ne_zero",
+        "Theorems.Thm_Polynomial_exists_frobenius_iterate_eq_rational_of_comp_rational_eq_rational",
+        "Theorems.Thm_WeierstrassCurve_exists_frobenius_comp_rational_of_comp_eq_of_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_surjective_of_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_exists_frobenius_comp_rational_of_comp_eq_of_mem_rationalHomSet": {
+      "path": "Theorems/Thm_WeierstrassCurve_exists_frobenius_comp_rational_of_comp_eq_of_mem_rationalHomSet.lean",
+      "git_blob": "0be26c0ef395357e91300e5d28e6b95aae842cb6",
+      "sha256": "0dc1aa48fb69835bfbedbee82c05932cd297d04fae22bbc480bd8775f2641c81",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_exists_frobenius_comp_rational_of_comp_eq_of_mem_rationalHomSet"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_exists_frobenius_comp_rational_of_comp_eq_of_mem_rationalHomSet": {
+      "path": "P2M/Sol/S_WeierstrassCurve_exists_frobenius_comp_rational_of_comp_eq_of_mem_rationalHomSet.lean",
+      "git_blob": "4e8dc46a80568e5c9a43e0fa78080aafdf453730",
+      "sha256": "fb28a1d41de6dbc807f3a0c6d5b7de75243e2ea74089a77b94d9bc5ae7d4bf7b",
+      "imports": [
+        "Mathlib",
+        "Definitions.Def_WeierstrassCurve_RationalEnd",
+        "Theorems.Thm_Polynomial_exists_frobenius_iterate_eq_rational_of_comp_rational_eq_rational",
+        "Theorems.Thm_WeierstrassCurve_surjective_of_mem_rationalHomSet",
+        "Theorems.Thm_WeierstrassCurve_Psi2Sq_ne_zero_of_isElliptic",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_Polynomial_exists_frobenius_iterate_eq_rational_of_comp_rational_eq_rational": {
+      "path": "Theorems/Thm_Polynomial_exists_frobenius_iterate_eq_rational_of_comp_rational_eq_rational.lean",
+      "git_blob": "c9ff9adfaba5a81e45f058569e802f6d1bf82e8d",
+      "sha256": "45f5e2f269e8a64a33add6581c917f089a36416f7a22e712d2eac5d617aee6ff",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_Polynomial_exists_frobenius_iterate_eq_rational_of_comp_rational_eq_rational"
+      ]
+    },
+    "P2M.Sol.S_Polynomial_exists_frobenius_iterate_eq_rational_of_comp_rational_eq_rational": {
+      "path": "P2M/Sol/S_Polynomial_exists_frobenius_iterate_eq_rational_of_comp_rational_eq_rational.lean",
+      "git_blob": "1a226fe2b47cbf4dbd9fe6cf56b643cab1d9c18e",
+      "sha256": "24cbc816cc18776b4fb1bff42c8a14b777533367a1cb40caf23336f3cf83a128",
+      "imports": [
+        "Mathlib",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_Polynomial_isCoprime_and_wronskian_ne_zero_comp_of_wronskian_ne_zero": {
+      "path": "Theorems/Thm_Polynomial_isCoprime_and_wronskian_ne_zero_comp_of_wronskian_ne_zero.lean",
+      "git_blob": "3c5afe25d718f741b6ddab5bed2f085b043749aa",
+      "sha256": "507b2623b70968aaeece0e8f3366399a9ba26ce2f4f0a60271be7795d50fe9ff",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_Polynomial_isCoprime_and_wronskian_ne_zero_comp_of_wronskian_ne_zero"
+      ]
+    },
+    "P2M.Sol.S_Polynomial_isCoprime_and_wronskian_ne_zero_comp_of_wronskian_ne_zero": {
+      "path": "P2M/Sol/S_Polynomial_isCoprime_and_wronskian_ne_zero_comp_of_wronskian_ne_zero.lean",
+      "git_blob": "8bcaa802cc35e8fee964454cd3a4e372e888077e",
+      "sha256": "8b391ad826c1f74f95a2d1243c500a40df08dee7e598b006c1f5c9f6397d31ee",
+      "imports": [
+        "Mathlib",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_Affine_evalEval_psi_sq": {
+      "path": "Theorems/Thm_WeierstrassCurve_Affine_evalEval_psi_sq.lean",
+      "git_blob": "57cb1dd4290884e77b9b9d2277ca71d4116d6718",
+      "sha256": "68542b901ad4848bfdb7bfc0bbb5a11f406749cd4b049f4b68edae493ae722ff",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_Affine_evalEval_psi_sq"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_Affine_evalEval_psi_sq": {
+      "path": "P2M/Sol/S_WeierstrassCurve_Affine_evalEval_psi_sq.lean",
+      "git_blob": "88a712dd26a79e8dcb9a9bab89de21c768a89c91",
+      "sha256": "d23f16526bb30088864b65bc7f12b09a8660a34cfcc63141e38c1798d7b17686",
+      "imports": [
+        "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic",
+        "P2M.Util"
+      ]
+    },
+    "Theorems.Thm_WeierstrassCurve_Psi2Sq_mul_wronskian_sq": {
+      "path": "Theorems/Thm_WeierstrassCurve_Psi2Sq_mul_wronskian_sq.lean",
+      "git_blob": "0bf23717c01ccc43191694dde76cf93d7614a2b6",
+      "sha256": "37ffaeb2e5d104e1b462e78c8512e9455b0f0be8b06f5d0cb32885ad0e90940f",
+      "imports": [
+        "Mathlib",
+        "P2M.Util",
+        "P2M.Sol.S_WeierstrassCurve_Psi2Sq_mul_wronskian_sq"
+      ]
+    },
+    "P2M.Sol.S_WeierstrassCurve_Psi2Sq_mul_wronskian_sq": {
+      "path": "P2M/Sol/S_WeierstrassCurve_Psi2Sq_mul_wronskian_sq.lean",
+      "git_blob": "dabcd783b1802ab8a8d37a65a47a6f7d9f72ee14",
+      "sha256": "7da47136434db1fb187bf37936bc6756ebb69b88a8018fd173cd0a4e026dca24",
+      "imports": [
+        "Mathlib",
+        "Theorems.Thm_WeierstrassCurve_Affine_evalEval_psi_sq",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_smul_some_eq_zero_iff",
+        "Theorems.Thm_WeierstrassCurve_Affine_Point_zsmul_some_eq_some_div",
+        "P2M.Util"
+      ]
+    }
+  }
+}
