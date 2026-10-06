@@ -227,6 +227,14 @@ class GitHubRuntimeTests(unittest.TestCase):
             + f"theorem {self.runtime._declaration_name(record)} : True := True.intro\n"
         )
         git(self.project, "add", "Submission.lean")
+        proof_path = self.runtime._final_root_proof_path()
+        if record.parent is None:
+            final = self.project / proof_path
+            final.parent.mkdir(parents=True, exist_ok=True)
+            final.write_text(
+                "1. The committed Lean proof applies True.intro, the constructor of True.\n2. Thus the exact root proposition holds without further assumptions.\n"
+            )
+            git(self.project, "add", proof_path)
         git(self.project, "commit", "-m", f"prove {record.id}")
         record.proof_base_commit = self.base
         record.candidate_commit = git(self.project, "rev-parse", "HEAD")
@@ -246,6 +254,10 @@ class GitHubRuntimeTests(unittest.TestCase):
             comparator_reran=True,
             comparator_passed=True,
             proof_matches_statement=True,
+            publication_proof_reviewed=record.parent is None,
+            publication_proof_blob=git(self.project, "rev-parse", f"HEAD:{proof_path}")
+            if record.parent is None
+            else "",
             issues=[],
             theorems=[
                 ProvedTheorem(
@@ -260,6 +272,26 @@ class GitHubRuntimeTests(unittest.TestCase):
             audit.model_dump_json()
         )
         self.runtime.store.render()
+
+    def test_root_final_prose_requires_review_of_exact_committed_blob(self):
+        root = self.node("root")
+        self.accept(root)
+        audit = self.runtime._latest_lean_audit(root)
+        self.assertEqual(self.runtime._theorem_publication_problem(root, audit), "")
+        self.assertIn("committed Lean proof", self.runtime._proof(root))
+        self.assertIn("For root", (self.project / root.natural_proof).read_text())
+        self.assertTrue(
+            self.runtime._theorem_publication_problem(
+                root, audit.model_copy(update={"publication_proof_reviewed": False})
+            )
+        )
+        self.assertTrue(
+            self.runtime._theorem_publication_problem(
+                root, audit.model_copy(update={"publication_proof_blob": "wrong"})
+            )
+        )
+        root.candidate_commit = self.base
+        self.assertTrue(self.runtime._theorem_publication_problem(root, audit))
 
     def test_root_children_and_grandchild_each_receive_one_issue_and_pr(self):
         root = self.node("root")

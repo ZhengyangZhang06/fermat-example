@@ -336,11 +336,18 @@ class GitHubTheoremRuntime(Runtime):
         )
 
     def _proof(self, node: NodeRecord) -> str:
+        if node.parent is None and node.candidate_commit:
+            return self._git(
+                "show", f"{node.candidate_commit}:{self._final_root_proof_path()}"
+            )
         if not node.natural_proof:
             raise PublicationError(f"{node.id} has no reviewed natural-language proof")
         return self._required_workspace_text(
             self.project / node.natural_proof, "natural proof"
         )
+
+    def _final_root_proof_path(self) -> str:
+        return f"proofs/github/{slug(self.run_root.name)}/root-final-proof.md"
 
     def _node_links(self, ids: list[str]) -> str:
         return (
@@ -409,7 +416,7 @@ class GitHubTheoremRuntime(Runtime):
         return super()._publish_decomposition_workspace(parent, *args)
 
     def _theorem_publication_instructions(self, node: NodeRecord) -> str:
-        return (
+        instructions = (
             f"\n\n## One theorem per solution PR\n\n"
             f"Implement only the tracked declaration `{self._declaration_name(node)}`. "
             "New named helper theorems belong in separate decomposition nodes with their "
@@ -419,7 +426,27 @@ class GitHubTheoremRuntime(Runtime):
             "previously accepted child/dependency declarations are already tracked. "
             "Reject additional new named theorems without their own tracked dependency "
             "nodes, recording the reason in `issues`.\n"
+            "Existing pinned upstream library declarations may be reused with explicit "
+            "provenance and full verification; do not describe them as newly invented helpers.\n"
         )
+        if node.parent is None:
+            path = self._final_root_proof_path()
+            instructions += (
+                "\n## Final root prose handoff\n\n"
+                f"The implementation author must commit a complete natural-language proof at `{path}`. "
+                "It must explain the actual Lean argument, with every assumption, dependency and "
+                "library-reuse provenance; distinguish historical decomposition work from lemmas "
+                "actually used. Preserve the original plan and reviewed outline as history. A "
+                "different valid formal proof route is allowed only with this matching final prose; "
+                "an unproved geometric obligation or a conditional outline is not a complete proof. "
+                "Do not silently rewrite old review records.\n"
+                "The fresh Lean reviewer must independently read and check this committed proof "
+                "step by step, compare it to the exact candidate Lean source, and reject gaps or "
+                "circularity. Only after that check, set `publication_proof_reviewed=true` and "
+                f"set `publication_proof_blob` to the output of `git rev-parse HEAD:{path}`. "
+                "This prose review is mandatory in addition to the comparator rerun.\n"
+            )
+        return instructions
 
     def _theorem_publication_problem(
         self, node: NodeRecord, audit: LeanAudit | None
@@ -428,6 +455,22 @@ class GitHubTheoremRuntime(Runtime):
             self._declaration_name(node)
         ]:
             return "one solution PR must prove exactly its tracked theorem; decompose named helpers"
+        if node.parent is None and audit is not None:
+            if not audit.publication_proof_reviewed:
+                return "root publication requires independent review of the complete final prose"
+            revision = node.candidate_commit or (
+                self._git_head(Path(node.worktree)) if node.worktree else ""
+            )
+            if not revision:
+                return "root publication has no committed candidate for its final prose"
+            try:
+                path = self._final_root_proof_path()
+                blob = self._git("rev-parse", f"{revision}:{path}")
+                prose = self._git("show", f"{revision}:{path}")
+            except PublicationError:
+                return "root candidate is missing its committed final prose proof"
+            if not prose or blob != audit.publication_proof_blob:
+                return "root final prose does not match the independently reviewed Git blob"
         return ""
 
     def _complete_accepted_integration(

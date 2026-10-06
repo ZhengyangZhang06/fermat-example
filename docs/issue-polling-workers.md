@@ -47,3 +47,14 @@ The local `issue-workers.json` roster records all eight workers. The live websit
 exports only worker IDs, state, issue numbers, poll counts and last-poll times;
 logs, claim tokens, process IDs and paths remain private. A working worker does
 not poll again until its current issue yields or completes.
+
+## Final root proof handoff
+
+The root implementation commits `proofs/github/RUN/root-final-proof.md` with the
+actual complete natural-language argument, used dependencies and library reuse
+provenance. The initial outline remains historical; a changed formal proof route
+must not be published with stale prose or unresolved conditional obligations.
+The independent Lean reviewer checks the final prose against the candidate and
+records its exact Git blob ID. Root acceptance rejects missing prose, absent
+review, or a mismatching blob. The issue and PR then use that reviewed candidate
+document, not the old outline. This does not weaken any comparator or axiom gate.

@@ -104,17 +104,22 @@ class FetchedProblem(BaseModel):
                 "source_url must be the canonical leaf URL for exactly problem_id"
             )
         expected_data_url = (
-            "https://lean-lang.org/eval/site-data/v2/problems/"
-            f"{self.problem_id}.json"
+            f"https://lean-lang.org/eval/site-data/v2/problems/{self.problem_id}.json"
         )
         if self.data_url != expected_data_url:
-            raise ValueError("data_url must be the canonical v2 endpoint for problem_id")
+            raise ValueError(
+                "data_url must be the canonical v2 endpoint for problem_id"
+            )
         headings = re.findall(r"(?m)^# (.+?)\s*$", self.markdown)
         if len(headings) != 1:
-            raise ValueError("problem Markdown must contain exactly one top-level heading")
+            raise ValueError(
+                "problem Markdown must contain exactly one top-level heading"
+            )
         if headings[0].strip() != self.title.strip():
             raise ValueError("problem Markdown heading must exactly match title")
-        problem_rows = re.findall(r"(?m)^\| Problem id \| `([^`]+)` \|\s*$", self.markdown)
+        problem_rows = re.findall(
+            r"(?m)^\| Problem id \| `([^`]+)` \|\s*$", self.markdown
+        )
         if not problem_rows or any(row != self.problem_id for row in problem_rows):
             raise ValueError(
                 "problem Markdown must contain Problem id rows that all match the selected problem"
@@ -323,7 +328,9 @@ class ChildProofHandoff(ReferenceAware):
         if self.audit.key != self.subproblem.key:
             raise ValueError("child handoff audit key must match the subproblem key")
         if not self.audit.passed:
-            raise ValueError("child handoff requires an accepted independent proof audit")
+            raise ValueError(
+                "child handoff requires an accepted independent proof audit"
+            )
         if len(self.resolved_dependencies) != len(self.subproblem.depends_on):
             raise ValueError("child handoff dependency resolution is incomplete")
         return self
@@ -469,6 +476,15 @@ class LeanAudit(ReferenceAware):
     """Independent Lean review performed only after the machine comparator gate passes."""
 
     model_config = {"extra": "forbid"}
+
+    publication_proof_reviewed: bool = Field(
+        default=False,
+        description="For the GitHub root: independently checked the complete committed final prose against the Lean proof, including all assumptions, dependencies and provenance",
+    )
+    publication_proof_blob: str = Field(
+        default="",
+        description="Git blob ID of the reviewed committed root-final-proof.md; empty for workflows that do not require this publication gate",
+    )
 
     accepted: bool = Field(
         description="true only if the exact requested theorem is proved without loopholes"
