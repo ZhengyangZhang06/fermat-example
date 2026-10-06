@@ -1,6 +1,44 @@
 "use strict";
 // The data branch updates independently of slower GitHub Pages deployments.
 let search, filter, rows;
+let graphZoom = 1;
+function bindGraph() {
+  const svg = document.querySelector(".dag-svg");
+  if (!svg) return;
+  function zoom() {
+    svg.style.width = `${graphZoom * 100}%`;
+    svg.classList.toggle("zoomed", graphZoom > 1);
+  }
+  zoom();
+  for (const button of document.querySelectorAll("[data-zoom]")) {
+    button.addEventListener("click", () => {
+      graphZoom = button.dataset.zoom === "reset" ? 1 : Math.max(1, Math.min(3,
+        graphZoom + (button.dataset.zoom === "in" ? .25 : -.25)));
+      zoom();
+    });
+  }
+  const nodes = [...svg.querySelectorAll(".dag-node")];
+  const edges = [...svg.querySelectorAll(".dag-edge")];
+  function highlight(id) {
+    const related = new Set([id]);
+    for (const edge of edges) {
+      if (edge.dataset.from === id || edge.dataset.to === id) {
+        related.add(edge.dataset.from);
+        related.add(edge.dataset.to);
+      }
+      edge.classList.toggle("related", edge.dataset.from === id || edge.dataset.to === id);
+    }
+    for (const node of nodes) node.classList.toggle("related", related.has(node.dataset.node));
+    svg.classList.toggle("has-focus", Boolean(id));
+  }
+  for (const node of nodes) {
+    node.addEventListener("mouseenter", () => highlight(node.dataset.node));
+    node.addEventListener("mouseleave", () => highlight(null));
+    node.addEventListener("focus", () => highlight(node.dataset.node));
+    node.addEventListener("blur", () => highlight(null));
+    node.addEventListener("click", () => setTimeout(revealTarget, 0));
+  }
+}
 function applyFilter() {
   const query = search.value.toLocaleLowerCase();
   let visible = 0;
@@ -20,6 +58,7 @@ function bindControls() {
   rows = [...document.querySelectorAll("tbody tr[data-search]")];
   search.addEventListener("input", applyFilter);
   filter.addEventListener("change", applyFilter);
+  bindGraph();
   applyFilter();
 }
 function revealTarget() {
@@ -76,7 +115,10 @@ function replaceSnapshot(payload) {
   const state = {query: search.value, filter: filter.value, x: scrollX, y: scrollY,
     focus: document.activeElement?.id, start: search.selectionStart, end: search.selectionEnd,
     expanded: rows.filter(row => row.querySelector("details")?.open).map(row => row.id),
-    contract: document.querySelector(".contract")?.open};
+    contract: document.querySelector(".contract")?.open,
+    build: document.querySelector(".build-details")?.open,
+    graphX: document.querySelector(".dag-viewport")?.scrollLeft || 0,
+    graphY: document.querySelector(".dag-viewport")?.scrollTop || 0};
   document.querySelector("main").replaceWith(main);
   bindControls();
   search.value = state.query;
@@ -87,6 +129,10 @@ function replaceSnapshot(payload) {
   }
   const contract = document.querySelector(".contract");
   if (contract) contract.open = Boolean(state.contract);
+  const build = document.querySelector(".build-details");
+  if (build) build.open = Boolean(state.build);
+  const graph = document.querySelector(".dag-viewport");
+  if (graph) { graph.scrollLeft = state.graphX; graph.scrollTop = state.graphY; }
   applyFilter();
   if (["search", "filter"].includes(state.focus)) {
     document.getElementById(state.focus).focus({preventScroll: true});
