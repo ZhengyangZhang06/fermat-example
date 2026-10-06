@@ -1,0 +1,33 @@
+{
+  "kind": "reference diagnostic only; not experiment solution acceptance",
+  "source_revision": "6e837e75355538c7f80bab5b956861e86c4eacc2",
+  "source_manifest_sha256": "821c169d841e0f4e3967ada0a31e799512a820cc8abd7672186aa1b85e2bce8b",
+  "module_count": 46,
+  "original_contract_commit": "9d6f2efe18bb6dd0747b7e00cae619ebb8cbe50b",
+  "original_contract_sha256": "19aee579275e573af4c852de7adb00dbfa3fb09e81f7c40e898930d64381bb59",
+  "declaration_renaming": {
+    "from": "WeierstrassCurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd",
+    "to": "P2MW.S_WeierstrassCurve_exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd.solution"
+  },
+  "lean_toolchain": "v4.33.1",
+  "mathlib_revision": "db584cd6d46c92f209a44c0f1c829460d327499d",
+  "verifier_sha256": "d299adeca6f589dfc2227c7f653585abd0dfcb6aa89af4894415f98dea1eae81",
+  "transitive_axioms": ["propext", "Classical.choice", "Quot.sound"],
+  "checks": {
+    "recovered_source_hashes": "passed",
+    "challenge_build": "passed",
+    "solution_closure_build": "passed",
+    "exact_contract_comparison": "passed",
+    "kernel_replay": "passed",
+    "axiom_report": "passed",
+    "diagnostic_exit_code": 0
+  },
+  "local_evidence": ".humanize/upstream-check-kfuym_10/reference-evidence.json",
+  "local_log": ".humanize/upstream-verification.log",
+  "remaining_gates": [
+    "commit a candidate under the experiment's exact root declaration",
+    "final natural-language proof matching the chosen Lean proof route",
+    "candidate comparator and independent reviewer rerun",
+    "required theorem solution PRs and root solution PR"
+  ]
+}
