@@ -83,6 +83,11 @@ class GitHubTheoremRuntime(Runtime):
             raise RuntimeError("RLCR adoption identity does not match the frozen node")
         worktree = Path(node.worktree)
         pid, identity = int(record["pid"]), record["start_ticks"]
+        if identity and process_identity(pid) == identity:
+            self.store.update(
+                node.id, "rlcr-lean",
+                "adopted the existing live proof process; no duplicate launch",
+            )
         while identity and process_identity(pid) == identity:
             self._check_workflow_health()
             time.sleep(5)
@@ -213,7 +218,7 @@ class GitHubTheoremRuntime(Runtime):
                 root = self.store.nodes.get("root")
                 if root and root.status == "proved":
                     print(
-                        f"Verified root solution PR (not automatically merged): {root.github_pr_url}"
+                        f"Verified root solution PR ({root.github_pr_state or 'merge not checked'}): {root.github_pr_url}"
                     )
             except PublicationError as error:
                 self.state.update(
@@ -403,6 +408,7 @@ class GitHubTheoremRuntime(Runtime):
                         self._issue_body(node),
                     )
                     node.github_issue_url = result["html_url"]
+                    node.github_issue_state = result.get("state", "")
                     self.store.render()
 
     def _decompose(self, node: NodeRecord, proof: NaturalProof) -> Decomposition | None:
@@ -681,7 +687,8 @@ class GitHubTheoremRuntime(Runtime):
                 raise PublicationError("local theorem publication branch moved")
             if not local_head:
                 self._git("update-ref", local_ref, snapshot["commit"], "0" * 40)
-            if node.parent is not None:
+            existing_pr = self.github.find_pull_request(self._marker(node, "pr"))
+            if node.parent is not None and not (existing_pr and existing_pr.get("merged_at")):
                 self._publish_ref(snapshot["base"], snapshot["base_commit"])
             self._publish_ref(snapshot["head"], snapshot["commit"])
             issue_number = node.github_issue_url.rstrip("/").rsplit("/", 1)[-1]
@@ -699,11 +706,17 @@ class GitHubTheoremRuntime(Runtime):
             )
             if self.website.url:
                 body += f"Problem status website: {self.website.url}\n\n"
+            body += (
+                "Automatic merge is authorized only for the verified head and frozen base; "
+                "issue closure follows confirmed merge.\n\n"
+                if self.config.github_auto_merge and self.config.github_close_proved_issues
+                else "Remote merge and issue state are recorded separately from proof acceptance.\n\n"
+            )
             if node.parent is not None:
                 body += (
                     "This theorem PR targets its frozen proof base for independent review. "
                     "The root solution PR delivers the integrated problem to the configured target branch. "
-                    "This workflow does not automatically merge or close issues.\n"
+                    "GitHub merge state is separate from local verification.\n"
                 )
             else:
                 body += "This root PR contains the complete integrated solution and all theorem proof records.\n\n"
@@ -728,3 +741,23 @@ class GitHubTheoremRuntime(Runtime):
             node.github_pr_checked_at = now()
             self.store.render()
             self._sync_issues([node])
+            if self.config.github_auto_merge:
+                # Recheck the retained audit even when resuming a durable publication.
+                audit = self._latest_lean_audit(node)
+                if not node.integrated_commit or audit is None or self._theorem_publication_problem(node, audit):
+                    raise PublicationError("automatic merge requires retained proof and integration evidence")
+                merged = self.github.merge_verified(result, commit=snapshot["commit"], base_commit=snapshot["base_commit"])
+                merge_commit = merged.get("merge_commit_sha", "")
+                tip = self._fetch_workspace_branch(self.config.github_workspace_remote, snapshot["base"])
+                if not merge_commit or not tip or self._git("rev-parse", f"{merge_commit}^{{tree}}") != self._git("rev-parse", f"{snapshot['commit']}^{{tree}}"):
+                    raise PublicationError("remote merge tree differs from the verified publication; revalidation required")
+                node.github_pr_state = "merged"
+                node.github_merge_commit = merge_commit
+                node.github_pr_checked_at = now()
+                self.store.render()
+            if self.config.github_close_proved_issues:
+                closed = self.github.close_proved_issue(node.github_issue_url, self._marker(node, "issue"))
+                if closed.get("state") != "closed":
+                    raise PublicationError("GitHub did not confirm theorem issue closure")
+                node.github_issue_state = "closed"
+                self.store.render()

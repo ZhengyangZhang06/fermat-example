@@ -87,8 +87,12 @@ class StatusPublisher:
             "GET", "pulls?state=all&per_page=100", paginate=True
         )
         by_url = {one["html_url"]: one for one in prs if one["html_url"] in tracked}
+        issues = self.runtime.github.request("GET", "issues?state=all&per_page=100", paginate=True)
+        issue_states = {one["html_url"]: one["state"] for one in issues if "pull_request" not in one}
         with self.runtime.store._lock:
             for node in self.runtime.store.nodes.values():
+                if node.github_issue_url in issue_states:
+                    node.github_issue_state = issue_states[node.github_issue_url]
                 if node.github_pr_url in by_url:
                     record = by_url[node.github_pr_url]
                     node.github_pr_state = (

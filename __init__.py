@@ -273,6 +273,8 @@ class GitHubTheoremConfig(Config):
     github_worker_mode: str = Field(default="poll", pattern="^(poll|dispatch)$")
     github_issue_workers: int = Field(default=8, ge=1, le=8)
     github_issue_poll_interval: float = Field(default=30, ge=5)
+    github_auto_merge: bool = Field(default=False, description="Explicitly authorize merging exact verified theorem PR heads")
+    github_close_proved_issues: bool = Field(default=False, description="Close proved theorem issues after solution publication (and merge when enabled)")
 
     github_workspace_remote: str = "origin"
     local_problem: bool = Field(

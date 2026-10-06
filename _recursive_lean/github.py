@@ -136,6 +136,38 @@ class GitHubClient:
         # A failed/uncertain POST escapes. Resume will list server state before any retry.
         return self.request("POST", "issues", payload)
 
+    def find_pull_request(self, marker: str) -> dict[str, Any] | None:
+        return self._marked(self.request("GET", "pulls?state=all&per_page=100", paginate=True), marker)
+
+    def merge_verified(self, record: dict[str, Any], *, commit: str, base_commit: str) -> dict[str, Any]:
+        """Normal GitHub merge with a head-SHA guard; never bypass protection."""
+        current = self.request("GET", f"pulls/{record['number']}")
+        if current["head"]["sha"] != commit or current["base"]["ref"] != record["base"]["ref"]:
+            raise PublicationError("theorem PR changed after verification; refusing merge")
+        if current.get("merged_at"):
+            return current
+        if current["state"] != "open" or current.get("draft") or current["base"]["sha"] != base_commit:
+            raise PublicationError("theorem PR is draft, closed, or has an unverified base; refusing merge")
+        result = self.request("PUT", f"pulls/{record['number']}/merge", {"sha": commit, "merge_method": "merge"})
+        if not result.get("merged"):
+            raise PublicationError("GitHub did not confirm the verified theorem merge")
+        merged = self.request("GET", f"pulls/{record['number']}")
+        if not merged.get("merged_at") or merged.get("merge_commit_sha") != result.get("sha"):
+            raise PublicationError("theorem merge needs remote reconciliation")
+        return merged
+
+    def close_proved_issue(self, url: str, marker: str) -> dict[str, Any]:
+        prefix = f"https://github.com/{self.repository}/issues/"
+        if not url.startswith(prefix) or not url[len(prefix):].isdigit():
+            raise PublicationError("invalid theorem issue identity")
+        resource = f"issues/{url[len(prefix):]}"
+        issue = self.request("GET", resource)
+        if "pull_request" in issue or (issue.get("body") or "").splitlines()[:1] != [marker]:
+            raise PublicationError("theorem issue identity changed; refusing closure")
+        if issue.get("state") == "closed":
+            return issue
+        return self.request("PATCH", resource, {"state": "closed", "state_reason": "completed"})
+
     def pull_request(
         self,
         marker: str,

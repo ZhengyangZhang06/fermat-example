@@ -37,7 +37,20 @@ class MemoryGitHub(GitHubClient):
             return {"full_name": self.repository}
         collection = self.issues if resource.startswith("issues") else self.prs
         if method == "GET":
+            if "?" not in resource and "/" in resource:
+                return dict(next(one for one in collection if one["number"] == int(resource.split("/")[1])))
             return [dict(one) for one in collection]
+        if method == "PUT" and resource.endswith("/merge"):
+            record = next(one for one in self.prs if one["number"] == int(resource.split("/")[1]))
+            if payload["sha"] != record["head"]["sha"]:
+                raise PublicationError("head moved")
+            record.update(state="closed", merged_at="2026-10-06T00:00:00Z", merge_commit_sha=payload["sha"])
+            if self.bare:
+                git(self.bare, "update-ref", f"refs/heads/{record['base']['ref']}", payload["sha"])
+            if self.lose_next_response:
+                self.lose_next_response = False
+                raise PublicationError("merged but response was lost")
+            return {"merged": True, "sha": payload["sha"]}
         if method == "PATCH":
             record = next(
                 one
@@ -57,7 +70,7 @@ class MemoryGitHub(GitHubClient):
                 if self.bare
                 else "abc",
             }
-            record["base"] = {"ref": payload["base"]}
+            record["base"] = {"ref": payload["base"], "sha": git(self.bare, "rev-parse", f"refs/heads/{payload['base']}") if self.bare else "base"}
         collection.append(record)
         if self.lose_next_response:
             self.lose_next_response = False
@@ -66,6 +79,28 @@ class MemoryGitHub(GitHubClient):
 
 
 class GitHubTransportTests(unittest.TestCase):
+    def test_merge_is_sha_guarded_and_reconciles_lost_success(self):
+        api = MemoryGitHub(Path.cwd())
+        pr = api.pull_request("<!-- pr -->", "Proof", "Body", head="proof", base="main", commit="abc")
+        for kwargs in ({"commit": "changed", "base_commit": "base"}, {"commit": "abc", "base_commit": "changed"}):
+            with self.assertRaises(PublicationError):
+                api.merge_verified(pr, **kwargs)
+        self.assertIsNone(api.prs[0]["merged_at"])
+        api.lose_next_response = True
+        with self.assertRaises(PublicationError):
+            api.merge_verified(pr, commit="abc", base_commit="base")
+        result = api.merge_verified(pr, commit="abc", base_commit="base")
+        self.assertTrue(result["merged_at"])
+
+    def test_issue_closure_rechecks_identity_and_is_idempotent(self):
+        api = MemoryGitHub(Path.cwd())
+        issue = api.issue("<!-- theorem -->", "Theorem", "Verified")
+        with self.assertRaises(PublicationError):
+            api.close_proved_issue(issue["html_url"], "<!-- wrong -->")
+        self.assertEqual(api.issues[0]["state"], "open")
+        for _ in range(2):
+            self.assertEqual(api.close_proved_issue(issue["html_url"], "<!-- theorem -->")["state"], "closed")
+
     def test_remote_identity_rejects_credentials_other_hosts_and_ambiguous_paths(self):
         for url in (
             "git@github.com:example/proofs.git",
@@ -272,6 +307,41 @@ class GitHubRuntimeTests(unittest.TestCase):
             audit.model_dump_json()
         )
         self.runtime.store.render()
+
+    def test_verified_child_merges_and_closes_only_when_explicitly_enabled(self):
+        root = self.node("root")
+        child = self.node("root.child", "root")
+        self.runtime._sync_issues([root, child])
+        self.runtime.config = self.runtime.config.model_copy(update={"github_auto_merge": True, "github_close_proved_issues": True})
+        self.assertEqual(self.api.issues[1]["state"], "open")
+        self.accept(child)
+        self.runtime._publish_solution(child)
+        self.assertEqual(child.github_pr_state, "merged")
+        self.assertEqual(child.github_issue_state, "closed")
+        self.assertEqual(self.api.issues[0]["state"], "open")
+        self.runtime._publish_solution(child)  # Merged base has advanced; never reset it.
+        self.assertEqual(len(self.api.prs), 1)
+        self.assertTrue(child.github_merge_commit)
+
+    def test_unverified_theorem_cannot_merge_or_close(self):
+        root = self.node("root")
+        self.runtime._sync_issues([root])
+        self.runtime.config = self.runtime.config.model_copy(update={"github_auto_merge": True, "github_close_proved_issues": True})
+        with self.assertRaises(PublicationError):
+            self.runtime._publish_solution(root)
+        self.assertEqual(self.api.issues[0]["state"], "open")
+        self.assertFalse(self.api.prs)
+
+    def test_merge_failure_does_not_close_issue(self):
+        self.node("root")
+        child = self.node("root.child", "root")
+        self.runtime._sync_issues([child])
+        self.accept(child)
+        self.runtime.config = self.runtime.config.model_copy(update={"github_auto_merge": True, "github_close_proved_issues": True})
+        with patch.object(self.api, "merge_verified", side_effect=PublicationError("branch protection")):
+            with self.assertRaises(PublicationError):
+                self.runtime._publish_solution(child)
+        self.assertEqual(self.api.issues[0]["state"], "open")
 
     def test_nested_plan_contains_root_final_prose_deliverable(self):
         root = self.node("root")

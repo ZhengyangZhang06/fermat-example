@@ -250,6 +250,21 @@ class PollingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "identity is incomplete"):
             runtime._adopt_issue_work(self.root)
 
+    def test_adopting_live_process_restores_running_status(self):
+        runtime = GitHubTheoremRuntime.__new__(GitHubTheoremRuntime)
+        runtime._node_dir = lambda node: self.project
+        runtime.store = Mock()
+        runtime._check_workflow_health = Mock()
+        self.root.worktree = str(self.project)
+        (self.project / "rlcr-process.json").write_text(json.dumps({
+            "node_id": "root", "worktree": str(self.project),
+            "pid": 99999, "start_ticks": "123", "before": "base", "consumed": False,
+        }))
+        with patch("_recursive_lean.github_runtime.process_identity", side_effect=["123", "123", ""]), patch("_recursive_lean.github_runtime.time.sleep"):
+            result = runtime._adopt_issue_work(self.root)
+        self.assertFalse(result.ok)  # A live process is not proof acceptance.
+        self.assertEqual(runtime.store.update.call_args.args[:2], ("root", "rlcr-lean"))
+
 
 if __name__ == "__main__":
     unittest.main()

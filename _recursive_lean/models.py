@@ -578,6 +578,8 @@ class NodeRecord(BaseModel):
     workspace_dispatch_branch: str = ""
     workspace_dispatch_commit: str = ""
     github_issue_url: str = ""
+    github_issue_state: str = ""
+    github_merge_commit: str = ""
     github_pr_url: str = ""
     github_pr_commit: str = ""
     github_pr_state: Literal["", "open", "closed", "merged"] = ""

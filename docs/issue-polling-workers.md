@@ -18,6 +18,25 @@ github_issue_workers: 8
 github_issue_poll_interval: 30
 ```
 
+With explicit user authorization, enable `github_auto_merge: true` and
+`github_close_proved_issues: true`. After all proof and integration gates pass,
+the workflow publishes the solution PR, verifies its exact head and frozen base,
+and requests a normal GitHub merge without bypassing branch protection. It checks
+that the remote merge tree equals the verified publication tree before closing
+the matching theorem issue as completed. Changed heads/bases, failed merges, or
+unverified proofs cannot trigger closure. Lost responses are reconciled by reading
+GitHub state; already-merged review bases are never reset. Child PRs merge into
+their frozen review-base branches; the verified root PR integrates the whole
+solution into the configured target branch. Both options default off in other
+experiments until authorization is supplied. The dashboard reports issue and PR
+states separately from proof acceptance.
+
+The status page includes an accessible SVG dependency DAG with prerequisite-to-
+dependent arrows, clickable theorem cards, status colors, related-edge highlighting,
+zoom controls, and a compact eight-worker roster. These are workflow prerequisites;
+the final proof document identifies actual formal dependencies. Graph zoom, scroll,
+expanded details, and search survive live snapshot refreshes.
+
 The eight workers are independent polling threads in one supervisor process;
 proof execution uses separate processes/worktrees. They are not eight machines.
 Polling intervals have jitter. Only ready issues occupy proof workers; an idle
