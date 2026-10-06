@@ -10,15 +10,20 @@ Pinned Lean toolchain: Lean 4.33.1, installed.
 
 | Theorem ID | Parent | Requires | Issue | Solution PR | State | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| root | none | not yet decomposed | [#1](https://github.com/ZhengyangZhang06/fermat-example/issues/1) | pending | natural-language proof drafting/review | run `20261006T035907Z-f6caab1a65`; no accepted proof yet |
+| root | none | children below; geometric obligations remain | [#1](https://github.com/ZhengyangZhang06/fermat-example/issues/1) | pending | waiting for children | prose and decomposition reviewed; no accepted Lean proof |
+| root.no_integer_scalar_relation-a1 | root | none | [#2](https://github.com/ZhengyangZhang06/fermat-example/issues/2) | pending | candidate under verification | minimal-harness checks only; full comparator pending |
+| root.trace_norm_uniqueness-a1 | root | root.no_integer_scalar_relation-a1 | [#3](https://github.com/ZhengyangZhang06/fermat-example/issues/3) | pending | waiting for prerequisite | exact contract and prose reviewed |
+| root.finite_kernel_torsion-a1 | root | none | [#4](https://github.com/ZhengyangZhang06/fermat-example/issues/4) | pending | candidate under verification | full build and comparator pending |
 
 ## Current run
 
-Run `20261006T035907Z-f6caab1a65` passed local-input preflight and completed its
-one-time proof plan. The worker is now drafting the natural-language proof for
-independent review. The pinned dependency build is running separately; formal
-verification waits for that build. These are active operations, not an
-authentication pause.
+Run `20261006T035907Z-f6caab1a65` passed local-input preflight, completed its
+one-time proof plan, and passed independent prose and decomposition review.
+Three child issues are published. The two independent leaves have Lean candidates;
+the trace/norm child waits for its scalar-relation prerequisite. The pinned
+dependency build is running separately; full formal verification waits for that
+build. These are active operations, not an authentication pause. This is a
+checkpoint; the live website reports subsequent controller state.
 
 [Live run visualization](https://zhengyangzhang06.github.io/fermat-example/theorem-status/deuring-criterion-b77c13c3d5/20261006t035907z-f6caab1a65/).
 GitHub Pages deployment has been confirmed built. The website is republished
@@ -53,7 +58,9 @@ It is a possible reuse source, not new work or accepted proof evidence. Its
 complete 46-module import closure has been recovered unchanged, with Git-blob
 and content-hash provenance. Its dependencies and transitive axioms still need
 checking; a separate reference diagnostic is queued behind the dependency build.
-No child theorem has been introduced or claimed solved.
+The three child theorems above are introduced and tracked, but none has yet passed
+the full acceptance gates. Their minimal-harness checks are diagnostic evidence,
+not a substitute for the configured comparator and independent rerun.
 
 Acceptance requires the unchanged theorem contract, a complete prose proof,
 passing Lean compilation/comparator, an independent reviewer check, and a
