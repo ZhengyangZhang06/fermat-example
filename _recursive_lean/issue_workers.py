@@ -237,6 +237,16 @@ class IssueWorkerPool:
             self.stop.wait(self.interval * random.uniform(0.85, 1.15))
 
     def run(self, root: Any) -> SolveResult:
+        if (
+            root.children
+            and not self.eligible(root)
+            and not self.runtime._accepted_checkpoint(root)
+        ):
+            self.runtime.store.update(
+                root.id,
+                "waiting-children",
+                "autonomous workers are polling prerequisite issues",
+            )
         self.runtime._ensure_polling_issue(root)
         for node in list(self.runtime.store.nodes.values()):
             if node.status == "integrating" and node.candidate_commit:
