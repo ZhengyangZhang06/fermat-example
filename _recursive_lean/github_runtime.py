@@ -391,6 +391,8 @@ class GitHubTheoremRuntime(Runtime):
             f"has its own issue and verified solution PR.\n\n"
             f"Solution PR: {node.github_pr_url or 'Pending'}\n\n"
             + (f"Status website: {self.website.url}\n\n" if self.website.url else "")
+            + ("Current user-authorized lifecycle: merge the exact verified PR, validate its remote tree, then close this proved issue. This supersedes historical no-auto-merge instructions in the original experiment brief.\n\n"
+               if self.config.github_auto_merge and self.config.github_close_proved_issues else "")
             + "Remote merge status is recorded by GitHub; local `proved` does not mean merged.\n"
         )
 

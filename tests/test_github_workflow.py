@@ -161,6 +161,9 @@ class GitHubTransportTests(unittest.TestCase):
         self.assertEqual(
             api.pull_request("<!-- pr -->", "Proof", "Body", **args)["number"], 1
         )
+        updated = api.pull_request("<!-- pr -->", "Proof", "Updated authorized lifecycle", **args)
+        self.assertIn("Updated authorized lifecycle", updated["body"])
+        self.assertTrue(updated["merged_at"])
 
     def test_cli_serializes_bodies_as_stdin_and_flattens_all_pages(self):
         api = GitHubClient("example/proofs", Path.cwd(), 30)

@@ -195,7 +195,11 @@ class GitHubClient:
                     raise PublicationError(
                         "theorem PR was closed without merge; resolve it before resuming"
                     )
-                return found
+                # Generated descriptions may need a lifecycle-policy update after
+                # explicit user authorization changes, without touching proof code.
+                if found["title"] == title and found.get("body") == payload["body"]:
+                    return found
+                return self.request("PATCH", f"pulls/{found['number']}", payload)
             if found["title"] == title and found.get("body") == payload["body"]:
                 return found
             return self.request("PATCH", f"pulls/{found['number']}", payload)
