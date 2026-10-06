@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "problem_id": "deuring-criterion",
+  "lean_target": "Submission.lean",
+  "comparator_command": "/home/ubuntu/.local/bin/python3.12 /mnt/data/zhengyang-workspace/fermat-example/tools/verify-node.py",
+  "comparator_success": "Your solution is okay!",
+  "rlcr_rounds": 20,
+  "max_depth": 3,
+  "max_children": 4
+}

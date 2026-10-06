@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "node_id": "root.no_integer_scalar_relation-a1",
+  "parent_id": "root",
+  "depth": 1,
+  "title": "An irreducible monic quadratic excludes integer scalar relations",
+  "statement": "Let R be a unital, possibly noncommutative ring of characteristic zero, let f ∈ R, and let t,q ∈ ℤ. Suppose f² − t f + q = 0 in R, where integers denote their canonical images, and suppose m² − tm + q ≠ 0 for every integer m. Then for every c,e ∈ ℤ with c ≠ 0, one has c f ≠ e in R.",
+  "lean_statement": "∀ {R : Type*} [Ring R] [CharZero R] (f : R) (t q : ℤ), f ^ 2 - (t : R) * f + (q : R) = 0 → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → ∀ c e : ℤ, c ≠ 0 → (c : R) * f ≠ (e : R)",
+  "lean_name": "deuring_no_integer_scalar_relation_f6caab1a65",
+  "depends_on": [],
+  "dependency_workspaces": [],
+  "result_branch": "humanize-recursive/fermat-example/20261006t035907z-f6caab1a65/root-no-integer-scalar-relation-a1-a1"
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "node_id": "root.finite_kernel_torsion-a1",
+  "parent_id": "root",
+  "depth": 1,
+  "title": "A prime divisor of a finite kernel produces a nonzero torsion point",
+  "statement": "Let A be an abelian group, let f:A→A be an additive endomorphism, and equip its kernel with a finite enumeration. Let p be a prime natural number. If p divides the cardinality of ker(f), then there is a∈A such that a≠0, f(a)=0, and p•a=0.",
+  "lean_statement": "∀ {A : Type*} [AddCommGroup A] (f : A →+ A) [Fintype f.ker] (p : ℕ) [Fact p.Prime], p ∣ Fintype.card f.ker → ∃ a : A, a ≠ 0 ∧ f a = 0 ∧ p • a = 0",
+  "lean_name": "deuring_finite_kernel_torsion_f6caab1a65",
+  "depends_on": [],
+  "dependency_workspaces": [],
+  "result_branch": "humanize-recursive/fermat-example/20261006t035907z-f6caab1a65/root-finite-kernel-torsion-a1-a1"
+}

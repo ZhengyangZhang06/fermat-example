@@ -1,0 +1,44 @@
+{
+  "reference_use": [
+    {
+      "source": "local-project",
+      "queries": [
+        "rationalHomSet|IsRationallyRepresented|toAffineAddEquiv|dualIsogeny|dual_isogeny|separableDegree|Isogeny",
+        "isInteger_of_isRoot|isInteger.*monic|exists.*orderOf.*eq_prime|exists.*prime.*nsmul|exists.*orderOf.*prime|exists.*prime.*orderOf|exists.*addOrderOf",
+        "dualIsogeny|dual_isogeny|separableDegree|Isogeny",
+        "deuring_no_integer_scalar_relation_f6caab1a65|deuring_trace_norm_unique_f6caab1a65|deuring_finite_kernel_torsion_f6caab1a65"
+      ],
+      "files": [
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/manifest.json",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/project/Definitions/Def_WeierstrassCurve_RationalEnd.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/RingTheory/Polynomial/RationalRoot.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/GroupTheory/Perm/Cycle/Type.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/AlgebraicGeometry/EllipticCurve/Projective/Point.lean",
+        "/mnt/data/zhengyang-workspace/fermat-example/.humanize/github-theorem-prover/runs/20261006T035907Z-f6caab1a65/local-references/054ed6fe690aab0d/mathlib/Mathlib/AlgebraicGeometry/EllipticCurve"
+      ],
+      "conclusion": "Confirmed the manifest revisions and inspected the rational-representation definition, integral-root theorem, additive Cauchy theorem and rotation proof, and coordinate additive equivalence. The separate elliptic-curve search for dualIsogeny, dual_isogeny, separableDegree, and Isogeny returned no matches. These findings do not establish G, D, or K. No proposed identifier occurs in the searched project Lean declarations. Independently reran all three exact proposition checks under Lean 4.33.1 with autoImplicit=false and minimal imports: all elaborated as Prop without child implementations. The aggregate Mathlib import still fails with an incompatible-header error; this audit does not certify full-project compilation, comparator acceptance, or transitive axioms."
+    }
+  ],
+  "acceptable": true,
+  "nodes": [
+    {
+      "key": "no_integer_scalar_relation",
+      "acceptable": true,
+      "natural_proof_acceptable": true,
+      "reason": "The one-line proposition exactly matches every prose hypothesis and conclusion. Integer casts are central and injective under Ring and CharZero; the proof correctly avoids cancellation in a possibly noncommutative ring with zero divisors. Its reduced-fraction and Bézout argument proves the required contradiction completely. The identifier is bare and unreserved in the inspected DAG; there are no dependencies or circular appeals."
+    },
+    {
+      "key": "trace_norm_uniqueness",
+      "acceptable": true,
+      "natural_proof_acceptable": true,
+      "reason": "The exact proposition matches the prose. Expanding (1−f)(1−g) and multiplying the resulting sum identity on the left uses only fg=d, never an unstated gf=d hypothesis. Subtraction gives (s−t)f=d−q with the correct signs. The declared dependency supplies precisely the exclusion needed to force s=t; cast injectivity then gives d=q. Its sole dependency points to no_integer_scalar_relation, so the graph is acyclic. The bare identifier is unreserved."
+    },
+    {
+      "key": "finite_kernel_torsion",
+      "acceptable": true,
+      "natural_proof_acceptable": true,
+      "reason": "The proposition correctly quantifies Fintype on the kernel subtype and Fact p.Prime, with natural-number scalar multiplication in A. The complete rotation argument proves existence of a nonzero kernel element killed by p, and inclusion preserves all three requested conclusions. No parent theorem or sibling is assumed, and the bare identifier is unreserved. Overall, this is an appropriate partial factorization into genuine reusable obligations: G, D, K, scalar faithfulness, and differential arguments remain explicit parent responsibilities, not consequences claimed for these children."
+    }
+  ],
+  "required_changes": []
+}

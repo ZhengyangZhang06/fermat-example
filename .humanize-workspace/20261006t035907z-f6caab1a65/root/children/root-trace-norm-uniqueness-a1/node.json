@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "node_id": "root.trace_norm_uniqueness-a1",
+  "parent_id": "root",
+  "depth": 1,
+  "title": "Dual product identities uniquely determine trace and norm",
+  "statement": "Let R be a unital, possibly noncommutative ring of characteristic zero. Let f,g ∈ R and t,q,d,e ∈ ℤ satisfy fg = d, (1−f)(1−g) = e, and f² − tf + q = 0, with integers interpreted by canonical casting. Suppose m² − tm + q ≠ 0 for every m ∈ ℤ. Then f+g = t in R and d=q in ℤ.",
+  "lean_statement": "∀ {R : Type*} [Ring R] [CharZero R] (f g : R) (t q d e : ℤ), f * g = (d : R) → (1 - f) * (1 - g) = (e : R) → f ^ 2 - (t : R) * f + (q : R) = 0 → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → f + g = (t : R) ∧ d = q",
+  "lean_name": "deuring_trace_norm_unique_f6caab1a65",
+  "depends_on": [
+    "root.no_integer_scalar_relation-a1"
+  ],
+  "dependency_workspaces": [
+    {
+      "node_id": "root.no_integer_scalar_relation-a1",
+      "result_branch": "",
+      "result_commit": "",
+      "integrated_commit": ""
+    }
+  ],
+  "result_branch": "humanize-recursive/fermat-example/20261006t035907z-f6caab1a65/root-trace-norm-uniqueness-a1-a1"
+}
