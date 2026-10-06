@@ -1,6 +1,6 @@
 # Final root proof: height and rational factorization
 
-This is the natural-language proof of the implemented route, submitted for independent review. It does not replace or edit the frozen natural-proof-v1.md geometric G/D/K outline. The additional reference was explicitly authorized in AGENTS.md. All library declarations below are unchanged upstream source, not newly invented child lemmas. The comparator-approved arithmetic/group children are historical decomposition work and are not dependencies of this route. Their inherited proof bodies in Submission.lean are preserved; this argument invokes none of them.
+This is the natural-language proof of the implemented route, submitted for independent review. It does not replace or edit the frozen natural-proof-v1.md geometric G/D/K outline. The additional reference was explicitly authorized in AGENTS.md. All library declarations below are unchanged upstream source, not newly invented child lemmas. The comparator-approved arithmetic/group children are historical decomposition work and are not dependencies of this route. Their original proof bodies in Submission.lean are preserved; this argument invokes none of them. A redundant triply nested copy of the finite-kernel child was removed after it caused a fatal namespace warning in the configured comparator.
 
 ## Exact hypotheses and notation
 
@@ -57,8 +57,10 @@ Its numbered argument is carried forward from
 `proofs/deuring-criterion/root-height-proof.md`; that original document and all
 historical review records remain unchanged. The actual root wrapper and its
 46-module upstream closure are unchanged. This repair also removes two duplicate
-placeholder root stubs found in the inherited candidate; neither is used in the
-proof. No new named helper theorem is introduced.
+placeholder root stubs and a redundant triply nested finite-kernel child copy
+found in the inherited candidate; none is used in the proof. The original child
+declaration is preserved, and Submission.lean is byte-identical to reviewed commit
+`0282bd68f3c063655577284abe3fb609b2590906`. No new named helper theorem is introduced.
 
 A reviewer must read this file from the exact committed candidate, compare each
 step with the Lean source, and record this path's Git blob only after independent

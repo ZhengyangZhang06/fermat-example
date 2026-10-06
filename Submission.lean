@@ -151,22 +151,5 @@ theorem deuring_trace_norm_unique_f6caab1a65 :
     exact hrel.symm
   have : d - q = 0 := by exact_mod_cast hdq
   exact sub_eq_zero.mp this
-namespace Submission
-
-set_option warningAsError true in
-theorem deuring_finite_kernel_torsion_f6caab1a65
-    {A : Type*} [AddCommGroup A] (f : A →+ A) [Fintype f.ker]
-    (p : ℕ) [Fact p.Prime] (hp : p ∣ Fintype.card f.ker) :
-    ∃ a : A, a ≠ 0 ∧ f a = 0 ∧ p • a = 0 := by
-  obtain ⟨a, ha⟩ := exists_prime_addOrderOf_dvd_card (G := f.ker) p hp
-  refine ⟨a, ?_, a.property, ?_⟩
-  · intro h
-    have hz : a = 0 := Subtype.ext h
-    have hp1 : p = 1 := by simpa only [hz, addOrderOf_zero] using ha.symm
-    exact (Fact.out : p.Prime).ne_one hp1
-  · have hpa : p • a = 0 := by
-      rw [← ha]
-      exact addOrderOf_nsmul_eq_zero a
-    exact congrArg (fun x : f.ker => (x : A)) hpa
 
 end Submission
