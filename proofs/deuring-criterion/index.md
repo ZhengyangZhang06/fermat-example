@@ -4,13 +4,25 @@ Original source: `/mnt/data/zhengyang-workspace/fermats-last-theorem/DeuringCrit
 Frozen contract: [DeuringCriterionStatement.lean](../../DeuringCriterionStatement.lean).
 Workflow repository: `ZhengyangZhang06/fermat-example`.
 Target branch: `main`.
-Root issue: publication will occur during the proof workflow.
+Root issue: [#1](https://github.com/ZhengyangZhang06/fermat-example/issues/1).
 Root solution PR: not opened; proof verification pending.
 Pinned Lean toolchain: Lean 4.33.1, installed.
 
 | Theorem ID | Parent | Requires | Issue | Solution PR | State | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| deuring-criterion/main | none | not yet decomposed | pending | pending | setup in progress | run artifacts under `.humanize/github-theorem-prover` |
+| root | none | not yet decomposed | [#1](https://github.com/ZhengyangZhang06/fermat-example/issues/1) | pending | natural-language proof drafting/review | run `20261006T035907Z-f6caab1a65`; no accepted proof yet |
+
+## Current run
+
+Run `20261006T035907Z-f6caab1a65` passed local-input preflight and completed its
+one-time proof plan. The worker is now drafting the natural-language proof for
+independent review. The pinned dependency build is running separately; formal
+verification waits for that build. These are active operations, not an
+authentication pause.
+
+[Live run visualization](https://zhengyangzhang06.github.io/fermat-example/theorem-status/deuring-criterion-b77c13c3d5/20261006t035907z-f6caab1a65/).
+GitHub Pages deployment has been confirmed built. The website is republished
+every ten minutes during the run and at its final checkpoint.
 
 ## Startup requirements
 
@@ -22,8 +34,10 @@ Pinned Lean toolchain: Lean 4.33.1, installed.
   rebuilding for Lean 4.33.1 because its 4.33.0 cached OLeans are incompatible.
 - Local-file acquisition is implemented and tested; no Lean-Eval problem is fetched.
   The complete workflow test suite passes 110 tests.
-- The real comparator replaces the startup failure placeholder. Its smoke tests
-  accept a valid proof and reject a changed statement, sorryAx, and an added axiom.
+- The real comparator replaces the startup failure placeholder. All six smoke
+  tests pass: valid proofs with and without a shared definition are accepted;
+  changed statements, sorryAx, added axioms, and changed dependent definitions
+  are rejected. Isolated builds use the frozen project's elaboration options.
 - Humanize's compatible planning/review flow is pinned to official flowverse
   revision `029c808b78f237daa624d798ae00843c2b0ca094`.
 - GitHub Pages is serving the `gh-pages` branch. Earlier paused snapshots remain
@@ -36,8 +50,10 @@ was found in the local source repository at revision
 `6e837e75355538c7f80bab5b956861e86c4eacc2`, under
 `P2M/Sol/S_WeierstrassCurve_exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd.lean`.
 It is a possible reuse source, not new work or accepted proof evidence. Its
-dependencies and transitive axioms still need checking. No child theorem has been
-introduced or claimed solved.
+complete 46-module import closure has been recovered unchanged, with Git-blob
+and content-hash provenance. Its dependencies and transitive axioms still need
+checking; a separate reference diagnostic is queued behind the dependency build.
+No child theorem has been introduced or claimed solved.
 
 Acceptance requires the unchanged theorem contract, a complete prose proof,
 passing Lean compilation/comparator, an independent reviewer check, and a
