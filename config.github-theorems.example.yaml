@@ -34,3 +34,6 @@ huggingface_token_env: HF_TOKEN
 artifact_dir: .humanize/github-theorem-prover
 wiki_dir: .humanize/math-wiki
 stop_on_child_failure: true
+github_worker_mode: poll
+github_issue_workers: 8
+github_issue_poll_interval: 30

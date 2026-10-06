@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -22,6 +23,7 @@ from urllib.request import Request, urlopen
 
 from hmz.flows import Stopped, load
 
+from .live_status import process_identity
 from .models import (
     ChildProofHandoff,
     Decomposition,
@@ -361,11 +363,7 @@ class Runtime:
         if self.reference_bundle is not None:
             print(f"Reference snapshots: {self.reference_bundle.manifest}")
         print(f"Theorem wiki: {self.project / self.config.wiki_dir / 'README.md'}")
-        result = (
-            self._resume_existing_dag(root)
-            if root.children and root.plan and root.natural_proof
-            else self._solve(root)
-        )
+        result = self._execute_graph(root)
         if result.ok:
             print(
                 f"Proved root theorem; {len(result.theorems)} theorem record(s) at root."
@@ -379,6 +377,19 @@ class Runtime:
             last_failure=result.feedback,
         )
         print(f"Root theorem not accepted: {result.feedback}")
+
+    def _execute_graph(self, root: NodeRecord) -> SolveResult:
+        return (
+            self._resume_existing_dag(root)
+            if root.children and root.plan and root.natural_proof
+            else self._solve(root)
+        )
+
+    def _handoff_published_children(
+        self, parent: NodeRecord, made: dict[str, NodeRecord]
+    ) -> list[SolveResult] | None:
+        """Alternative pull schedulers may yield here; default retains dispatch."""
+        return None
 
     def _bootstrap(self) -> FetchedProblem:
         """Prepare references and fetch exactly one problem before planning."""
@@ -547,9 +558,7 @@ class Runtime:
                     FETCH_ONE_PROBLEM.format(
                         collection_url=PROBLEM_COLLECTION_URL,
                         problem_id=self.problem_id,
-                        problem_url=PROBLEM_PAGE_URL.format(
-                            problem_id=self.problem_id
-                        ),
+                        problem_url=PROBLEM_PAGE_URL.format(problem_id=self.problem_id),
                         problem_data_url=PROBLEM_DATA_URL.format(
                             problem_id=self.problem_id
                         ),
@@ -596,7 +605,8 @@ class Runtime:
                 + feedback
             )
         fetched = FetchedProblem.model_validate(
-            fetched.model_dump() | {"markdown": self._render_problem_markdown(site_data)}
+            fetched.model_dump()
+            | {"markdown": self._render_problem_markdown(site_data)}
         )
         atomic_text(self.problem_path, fetched.markdown.rstrip() + "\n")
         # Normalize the structured copy to the exact bytes frozen in problem.md.
@@ -622,13 +632,19 @@ class Runtime:
             ) as response:
                 raw = response.read(5_000_001)
         except (HTTPError, URLError, TimeoutError, OSError) as error:
-            raise RuntimeError(f"could not fetch authoritative problem JSON: {url}") from error
+            raise RuntimeError(
+                f"could not fetch authoritative problem JSON: {url}"
+            ) from error
         if len(raw) > 5_000_000:
-            raise RuntimeError("authoritative problem JSON exceeds the 5 MB safety limit")
+            raise RuntimeError(
+                "authoritative problem JSON exceeds the 5 MB safety limit"
+            )
         try:
             data = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise RuntimeError("authoritative problem endpoint returned invalid JSON") from error
+            raise RuntimeError(
+                "authoritative problem endpoint returned invalid JSON"
+            ) from error
         self._validate_problem_site_data(data)
         atomic_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
         return data
@@ -649,7 +665,9 @@ class Runtime:
             raise RuntimeError("authoritative problem JSON has no title")
         revision = problem.get("statement_revision")
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
-            raise RuntimeError("authoritative problem JSON has no valid statement revision")
+            raise RuntimeError(
+                "authoritative problem JSON has no valid statement revision"
+            )
         if not isinstance(problem.get("module"), str) or not problem["module"].strip():
             raise RuntimeError("authoritative problem JSON has no module")
 
@@ -681,7 +699,9 @@ class Runtime:
         problem = data["problem"]
 
         def json_block(value: Any) -> str:
-            payload = json.dumps(value, ensure_ascii=False, indent=2).replace("/", "\\/")
+            payload = json.dumps(value, ensure_ascii=False, indent=2).replace(
+                "/", "\\/"
+            )
             longest = max((len(run) for run in re.findall(r"`+", payload)), default=0)
             fence = "`" * max(3, longest + 1)
             return f"{fence}json\n{payload}\n{fence}"
@@ -967,9 +987,7 @@ class Runtime:
             children = self._solve_children(node, decomposition, attempt)
             failed = [one for one in children if not one.ok]
             controller_failure = any(one.node_id == node.id for one in failed)
-            if failed and (
-                controller_failure or self.config.stop_on_child_failure
-            ):
+            if failed and (controller_failure or self.config.stop_on_child_failure):
                 feedback = "Required child failure(s): " + "; ".join(
                     f"{one.node_id}: {one.feedback}" for one in failed
                 )
@@ -1450,9 +1468,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             "## Key steps\n\n"
             + "\n".join(
                 f"{index}. {step}"
-                for index, step in enumerate(
-                    handoff.subproblem.proof_key_steps, 1
-                )
+                for index, step in enumerate(handoff.subproblem.proof_key_steps, 1)
             )
             + "\n\n## Reference use\n\n"
             + self._reference_use_markdown(handoff.reference_use)
@@ -1735,6 +1751,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     feedback=workspace_problem,
                 )
             ]
+        handed_off = self._handoff_published_children(parent, made)
+        if handed_off is not None:
+            return handed_off
         if self._speculation_enabled():
             self.store.update(
                 parent.id,
@@ -1767,9 +1786,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                         node_id=checkpoint.id,
                         theorems=self._checkpoint_theorems(checkpoint),
                     )
-                elif (
-                    checkpoint.status == "integrating" and checkpoint.candidate_commit
-                ):
+                elif checkpoint.status == "integrating" and checkpoint.candidate_commit:
                     theorems = self._checkpoint_theorems(checkpoint)
                     if not theorems:
                         results[key] = SolveResult(
@@ -1982,9 +1999,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     "retrying failed checkpoint before resumed speculative initialization",
                 )
                 future = executor.submit(
-                    self._formalize_checkpoint_parent
-                    if node.children
-                    else self._solve,
+                    self._formalize_checkpoint_parent if node.children else self._solve,
                     node,
                 )
                 running[future] = node.id
@@ -2122,7 +2137,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             result = self._formalize(node, plan, natural, children)
             if result.ok:
                 return result
-            feedback = result.feedback or "formalization did not pass its acceptance gates"
+            feedback = (
+                result.feedback or "formalization did not pass its acceptance gates"
+            )
             time.sleep(min(60.0, max(1.0, float(node.lean_attempts))))
 
     def _advance_lean_attempt(self, node: NodeRecord) -> None:
@@ -2388,9 +2405,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
 
     def _speculation_enabled(self) -> bool:
         """Whether decomposed parents should code against frozen child interfaces."""
-        return bool(
-            getattr(self.config, "speculative_parent_formalization", False)
-        )
+        return bool(getattr(self.config, "speculative_parent_formalization", False))
 
     def _normalize_speculative_parent_states(self) -> None:
         """Remove legacy waiting labels before any resumed workers are submitted."""
@@ -2407,10 +2422,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     "all real child candidates are accepted; final parent "
                     "formalization is ready"
                 )
-            elif (
-                node.speculative_commit
-                and node.speculative_contract_digest == digest
-            ):
+            elif node.speculative_commit and node.speculative_contract_digest == digest:
                 status = "speculative-ready"
                 message = (
                     "parent Lean draft already exists under the exact frozen child "
@@ -2424,9 +2436,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 )
             self.store.update(node.id, status, message)
 
-    def _speculative_contract(
-        self, node: NodeRecord
-    ) -> tuple[str, list[NodeRecord]]:
+    def _speculative_contract(self, node: NodeRecord) -> tuple[str, list[NodeRecord]]:
         """Return a stable digest and exact records assumed by a speculative parent."""
         records = [
             self.store.nodes[node_id]
@@ -2473,10 +2483,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     ),
                 )
             return None
-        if (
-            node.speculative_commit
-            and node.speculative_contract_digest == digest
-        ):
+        if node.speculative_commit and node.speculative_contract_digest == digest:
             if node.status not in {
                 "rlcr-lean",
                 "comparing",
@@ -2826,9 +2833,8 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             for line in diff.stdout.splitlines()
             if line.startswith("+") and not line.startswith("+++")
         )
-        if (
-            "HumanizeSpeculativeChildren" in added
-            or re.search(r"\b(?:sorry|admit|axiom|unsafe)\b", added)
+        if "HumanizeSpeculativeChildren" in added or re.search(
+            r"\b(?:sorry|admit|axiom|unsafe)\b", added
         ):
             subprocess.run(
                 ["git", "restore", "--staged", "--", *paths],
@@ -2995,12 +3001,12 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         if self._git_clean(worktree):
             return True, "worktree already clean"
         if worktree.resolve() == self.project:
-            return False, "refusing to stash the canonical project as an interrupted node"
+            return (
+                False,
+                "refusing to stash the canonical project as an interrupted node",
+            )
         version = max(node.lean_attempts, 1)
-        label = (
-            f"humanize interrupted {slug(node.id)} "
-            f"lean-attempt-{version}"
-        )
+        label = f"humanize interrupted {slug(node.id)} lean-attempt-{version}"
         # A killed Git process can leave a worktree-local index lock behind.  This
         # method owns the isolated node worktree and runs before a replacement RLCR
         # process is launched, but retain a recent lock in case the old process is
@@ -3023,7 +3029,10 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 try:
                     age = max(0.0, time.time() - index_lock.stat().st_mtime)
                 except OSError as error:
-                    return False, f"could not inspect interrupted Git index lock: {error}"
+                    return (
+                        False,
+                        f"could not inspect interrupted Git index lock: {error}",
+                    )
                 if age < 300.0:
                     return (
                         False,
@@ -3032,7 +3041,10 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 try:
                     index_lock.unlink()
                 except OSError as error:
-                    return False, f"could not remove stale interrupted Git index lock: {error}"
+                    return (
+                        False,
+                        f"could not remove stale interrupted Git index lock: {error}",
+                    )
                 lock_audit = (
                     f"index lock: {index_lock}\n"
                     f"index lock age seconds: {age:.3f}\n"
@@ -3143,7 +3155,10 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             log,
         )
         if preserved.returncode or not self._git_clean(worktree):
-            return False, "could not preserve interrupted participant edits in Git stash"
+            return (
+                False,
+                "could not preserve interrupted participant edits in Git stash",
+            )
         return True, "interrupted participant edits preserved in recoverable Git stash"
 
     def _formalize(
@@ -3247,6 +3262,18 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 node_id=node.id,
                 feedback=f"isolated humanize1:rlcr failed; see {rlcr_log}",
             )
+        result = self._finish_rlcr_candidate(node, worktree, before)
+        receipt = self._node_dir(node) / "rlcr-process.json"
+        if receipt.is_file():
+            record = json.loads(receipt.read_text())
+            record["consumed"] = True
+            atomic_text(receipt, json.dumps(record, indent=2) + "\n")
+        return result
+
+    def _finish_rlcr_candidate(
+        self, node: NodeRecord, worktree: Path, before: str
+    ) -> SolveResult:
+        """Shared exact-comparator/reviewer/integration gates, including adoption."""
         after = self._git_head(worktree)
         if not self._git_clean(worktree):
             return SolveResult(
@@ -3298,7 +3325,8 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 comparator_command=self._review_command(node, lean_files),
                 comparator_success=self.config.comparator_success,
                 comparator_log=log[-12000:],
-            ) + self._theorem_publication_instructions(node),
+            )
+            + self._theorem_publication_instructions(node),
             LeanAudit,
         )
         if audit is not None:
@@ -3313,9 +3341,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             return self._reject_lean_audit(
                 node, audit, reference_problem or contract_problem
             )
-        pushed, push_feedback = self._push_child_workspace_result(
-            node, worktree, after
-        )
+        pushed, push_feedback = self._push_child_workspace_result(node, worktree, after)
         if not pushed:
             self.store.update(
                 node.id,
@@ -3468,9 +3494,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
 
     def _review_command(self, node: NodeRecord, lean_files: list[str]) -> str:
         """Render the comparator with explicit controller paths for isolated worktrees."""
-        token_environment = getattr(
-            self.config, "huggingface_token_env", "HF_TOKEN"
-        )
+        token_environment = getattr(self.config, "huggingface_token_env", "HF_TOKEN")
         environment = (
             f"HUMANIZE_RUN_DIR={shlex.quote(str(self.run_root))} "
             f"HUMANIZE_WIKI_DIR={shlex.quote(str(self.store.wiki))} "
@@ -3548,16 +3572,63 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             else "",
         )
         with log_path.open("w", encoding="utf-8") as output:
-            completed = subprocess.run(
-                command,
-                cwd=worktree,
-                env=environment,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
-            )
-        return completed.returncode == 0, log_path
+            if getattr(self.config, "github_worker_mode", "dispatch") != "poll":
+                completed = subprocess.run(
+                    command,
+                    cwd=worktree,
+                    env=environment,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=False,
+                )
+                return completed.returncode == 0, log_path
+            existing = [
+                str(p) for p in (worktree / ".humanize/rlcr").glob("*") if p.is_dir()
+            ]
+            receipt = node_dir / "rlcr-process.json"
+            record = {
+                "node_id": node.id,
+                "pid": None,
+                "start_ticks": None,
+                "worktree": str(worktree),
+                "before": node.proof_base_commit or review_base,
+                "log": str(log_path),
+                "config": str(config_path),
+                "started_at": now(),
+                "existing_rlcr_dirs": existing,
+                "consumed": False,
+            }
+            atomic_text(receipt, json.dumps(record, indent=2) + "\n")
+            # A crash in the spawn/receipt window must fail closed, never launch
+            # a second proof process whose predecessor may still be running.
+            try:
+                process = subprocess.Popen(
+                    command,
+                    cwd=worktree,
+                    env=environment,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                )
+            except OSError:
+                record["consumed"] = True
+                atomic_text(receipt, json.dumps(record, indent=2) + "\n")
+                raise
+            record.update(pid=process.pid, start_ticks=process_identity(process.pid))
+            atomic_text(receipt, json.dumps(record, indent=2) + "\n")
+            try:
+                while process.poll() is None:
+                    self._check_workflow_health()
+                    time.sleep(1)
+            except BaseException:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGTERM)
+                raise
+            record.update(returncode=process.returncode, ended_at=now())
+            atomic_text(receipt, json.dumps(record, indent=2) + "\n")
+            return process.returncode == 0, log_path
 
     @staticmethod
     def _agent_spec(agent: Any) -> str:
@@ -3608,7 +3679,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     "GitHub workspace remote must not embed credentials in its URL"
                 )
             if parsed.scheme == "http":
-                raise RuntimeError("GitHub workspace remote must not use plaintext HTTP")
+                raise RuntimeError(
+                    "GitHub workspace remote must not use plaintext HTTP"
+                )
         return remote
 
     def _github_workspace_timeout(self) -> float:
@@ -3637,11 +3710,15 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             ) from error
 
     def _workspace_dispatch_branch(self, parent: NodeRecord) -> str:
-        prefix = getattr(
-            self.config,
-            "github_workspace_branch_prefix",
-            "humanize-workspace",
-        ).strip().strip("/")
+        prefix = (
+            getattr(
+                self.config,
+                "github_workspace_branch_prefix",
+                "humanize-workspace",
+            )
+            .strip()
+            .strip("/")
+        )
         branch = (
             f"{prefix}/{slug(self.project.name)}/{slug(self.run_root.name)}/"
             f"dispatch/{slug(parent.id)}"
@@ -3658,11 +3735,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         return branch
 
     def _workspace_dispatch_root(self, parent: NodeRecord) -> Path:
-        return (
-            Path(".humanize-workspace")
-            / slug(self.run_root.name)
-            / slug(parent.id)
-        )
+        return Path(".humanize-workspace") / slug(self.run_root.name) / slug(parent.id)
 
     @staticmethod
     def _workspace_digest(content: str) -> str:
@@ -3694,7 +3767,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         include("task.md", f"# Recursive Lean task\n\n{self.task.strip()}\n")
         include(
             "problem.md",
-            self._required_workspace_text(self.problem_path, "fetched problem Markdown"),
+            self._required_workspace_text(
+                self.problem_path, "fetched problem Markdown"
+            ),
         )
         include(
             "problem.json",
@@ -3793,8 +3868,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                         "node_id": dependency,
                         "result_branch": record.workspace_result_branch,
                         "result_commit": (
-                            record.workspace_result_commit
-                            or record.candidate_commit
+                            record.workspace_result_commit or record.candidate_commit
                         ),
                         "integrated_commit": record.integrated_commit,
                     }
@@ -3803,9 +3877,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 ],
                 "result_branch": result_branch,
             }
-            files[(bundle / "node.json").as_posix()] = json.dumps(
-                child_contract, ensure_ascii=False, indent=2
-            ) + "\n"
+            files[(bundle / "node.json").as_posix()] = (
+                json.dumps(child_contract, ensure_ascii=False, indent=2) + "\n"
+            )
             entries.append(
                 GitWorkspaceChild(
                     node_id=child.id,
@@ -3917,7 +3991,11 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             check=False,
         )
         ancestry = parents.stdout.split()
-        if parents.returncode or len(ancestry) != 2 or ancestry[1] != dispatch.source_commit:
+        if (
+            parents.returncode
+            or len(ancestry) != 2
+            or ancestry[1] != dispatch.source_commit
+        ):
             raise RuntimeError(
                 "GitHub workspace dispatch must be one immutable commit over its source base"
             )
@@ -3958,9 +4036,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         }
 
         def validate(commit: str) -> GitWorkspaceDispatch:
-            dispatch = self._load_workspace_dispatch(
-                commit, manifest_path.as_posix()
-            )
+            dispatch = self._load_workspace_dispatch(commit, manifest_path.as_posix())
             if (
                 dispatch.run_id != self.run_root.name
                 or dispatch.parent_id != parent.id
@@ -3994,7 +4070,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         else:
             source = self._git_head(self.project)
             if not source:
-                raise RuntimeError("could not determine Git source for workspace dispatch")
+                raise RuntimeError(
+                    "could not determine Git source for workspace dispatch"
+                )
             scratch_parent = self.project.parent / ".recursive-lean-dispatch-worktrees"
             scratch_parent.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(
@@ -4089,13 +4167,13 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         if pushed.returncode:
             raced = self._fetch_workspace_branch(remote, branch)
             if not raced:
-                raise RuntimeError(
-                    f"could not push GitHub workspace branch {branch!r}"
-                )
+                raise RuntimeError(f"could not push GitHub workspace branch {branch!r}")
             return raced, validate(raced)
         remote_head = self._fetch_workspace_branch(remote, branch)
         if remote_head != local_head:
-            raise RuntimeError("GitHub dispatch branch did not retain the pushed commit")
+            raise RuntimeError(
+                "GitHub dispatch branch did not retain the pushed commit"
+            )
         return local_head, dispatch
 
     def _publish_decomposition_workspace(
@@ -4144,9 +4222,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         except (OSError, RuntimeError, ValueError) as error:
             return f"could not publish reviewed child handoffs to GitHub: {error}"
 
-    def _ensure_local_workspace_branch(
-        self, branch: str, handoff_commit: str
-    ) -> None:
+    def _ensure_local_workspace_branch(self, branch: str, handoff_commit: str) -> None:
         local_ref = f"refs/heads/{branch}"
         head = self._local_ref_head(local_ref)
         if not head:
@@ -4216,7 +4292,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 raise RuntimeError("workspace manifest names the wrong run or contract")
             entries = [one for one in dispatch.children if one.node_id == node.id]
             if len(entries) != 1:
-                raise RuntimeError("workspace manifest does not select exactly one child")
+                raise RuntimeError(
+                    "workspace manifest does not select exactly one child"
+                )
             entry = entries[0]
             expected_handoff_path = str(
                 Path(entry.handoff.plan_path).parent / "parent-child-handoff.json"
@@ -4266,9 +4344,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     remote, node.workspace_result_branch
                 )
                 if result_head != node.workspace_result_commit:
-                    raise RuntimeError(
-                        "recorded child result commit changed on GitHub"
-                    )
+                    raise RuntimeError("recorded child result commit changed on GitHub")
                 local_head = self._local_ref_head(
                     f"refs/heads/{node.workspace_result_branch}"
                 )
@@ -4323,7 +4399,9 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         try:
             remote = self._github_workspace_remote()
             if remote != node.workspace_remote:
-                raise RuntimeError("child result remote differs from its dispatch remote")
+                raise RuntimeError(
+                    "child result remote differs from its dispatch remote"
+                )
             if not node.workspace_result_branch or not node.workspace_handoff_commit:
                 raise RuntimeError("child result lacks remote branch coordinates")
             if self._git_head(worktree) != candidate:
@@ -4342,12 +4420,16 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 check=False,
             )
             if ancestor.returncode:
-                raise RuntimeError("child result does not descend from its dispatch commit")
+                raise RuntimeError(
+                    "child result does not descend from its dispatch commit"
+                )
             local_head = self._local_ref_head(
                 f"refs/heads/{node.workspace_result_branch}"
             )
             if local_head != candidate:
-                raise RuntimeError("child result branch does not name the reviewed commit")
+                raise RuntimeError(
+                    "child result branch does not name the reviewed commit"
+                )
             remote_head = self._fetch_workspace_branch(
                 remote, node.workspace_result_branch
             )
@@ -4377,7 +4459,10 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 )
                 if pushed.returncode:
                     raise RuntimeError("could not push reviewed child result to GitHub")
-            if self._fetch_workspace_branch(remote, node.workspace_result_branch) != candidate:
+            if (
+                self._fetch_workspace_branch(remote, node.workspace_result_branch)
+                != candidate
+            ):
                 raise RuntimeError("GitHub child result branch has the wrong commit")
             node.workspace_result_commit = candidate
             self.store.render()
@@ -4396,14 +4481,10 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
             expected = node.workspace_result_commit or node.candidate_commit
             if not expected or expected != node.candidate_commit:
                 raise RuntimeError("accepted child lacks its pushed result checkpoint")
-            actual = self._fetch_workspace_branch(
-                remote, node.workspace_result_branch
-            )
+            actual = self._fetch_workspace_branch(remote, node.workspace_result_branch)
             if actual != expected:
                 raise RuntimeError("accepted child result branch changed on GitHub")
-            local = self._local_ref_head(
-                f"refs/heads/{node.workspace_result_branch}"
-            )
+            local = self._local_ref_head(f"refs/heads/{node.workspace_result_branch}")
             if not local:
                 self._ensure_local_workspace_branch(
                     node.workspace_result_branch, node.workspace_handoff_commit
@@ -5265,10 +5346,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 return None
             return candidate
 
-        if (
-            self.state.get("version") == 1
-            and self.state.get("task_digest") == digest
-        ):
+        if self.state.get("version") == 1 and self.state.get("task_digest") == digest:
             candidate = validated(self.state.get("run_dir"))
             if candidate is not None:
                 return candidate
@@ -5389,9 +5467,7 @@ not blockers for completion of this implementation-only plan.
     def _task_digest(self) -> str:
         configured_problem = getattr(self.config, "problem_id", "").strip()
         material = (
-            f"{configured_problem}\0{self.task}"
-            if configured_problem
-            else self.task
+            f"{configured_problem}\0{self.task}" if configured_problem else self.task
         )
         return hashlib.sha256(material.encode()).hexdigest()
 

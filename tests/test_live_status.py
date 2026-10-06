@@ -45,7 +45,25 @@ class LiveObservationTests(unittest.TestCase):
                     }
                 ],
             }
+            (root / "issue-workers.json").write_text(
+                json.dumps(
+                    {
+                        "workers": {
+                            f"worker-{i:02}": {
+                                "state": "idle",
+                                "polls": 2,
+                                "error": "/private/token",
+                                "claim": "secret-claim",
+                            }
+                            for i in range(1, 9)
+                        }
+                    }
+                )
+            )
             feed = live_snapshot(seed, dag, root, controller_running=True, build=build)
+            self.assertEqual(len(feed["snapshot"]["activity"]["pollers"]), 8)
+            self.assertIn("Autonomous issue workers (8)", feed["page"])
+            self.assertNotIn("secret-claim", json.dumps(feed))
             self.assertEqual(feed["snapshot"]["verified"], 0)
             self.assertIn("40 / 100 build jobs", feed["page"])
             self.assertIn("&lt;script&gt;bad", feed["page"])

@@ -121,6 +121,21 @@ def live_snapshot(
         "build": build,
         "workers": workers,
     }
+    roster_path = run_root / "issue-workers.json"
+    if roster_path.is_file():
+        roster = json.loads(roster_path.read_text())
+        data["activity"]["pollers"] = [
+            {
+                "id": worker,
+                "state": record.get("state", "unknown")
+                if controller_running
+                else "stopped",
+                "polls": record.get("polls", 0),
+                "last_poll_at": record.get("last_poll_at", ""),
+                "issue": record.get("issue"),
+            }
+            for worker, record in sorted(roster.get("workers", {}).items())
+        ]
     data["updated_at"] = data["activity"]["observed_at"]
     data["stale_after_seconds"] = 180
     return {"snapshot": data, "page": render_page(data)}

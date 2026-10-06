@@ -234,6 +234,16 @@ def render_activity(activity: dict[str, Any] | None) -> str:
         f"<br><small>Last worker log activity: {esc(one['last_activity'] or 'Not recorded')}</small></li>"
         for one in activity["workers"]
     )
+    pollers = ""
+    if activity.get("pollers"):
+        rows = "".join(
+            f"<li><b>{esc(one['id'])}</b>: {esc(one['state'])}"
+            + (f" · issue #{int(one['issue'])}" if one.get("issue") else "")
+            + f" · {int(one['polls'])} polls"
+            + f"<br><small>Last poll: {esc(one.get('last_poll_at') or 'Not yet')}</small></li>"
+            for one in activity["pollers"]
+        )
+        pollers = f"<h3>Autonomous issue workers ({len(activity['pollers'])})</h3><p>Independent polling on one host; exclusive per-issue locks. Idle workers wait for eligible issues.</p><ul>{rows}</ul>"
     return f"""<section class="panel live-activity" aria-label="Current workflow activity">
 <div class="panel-head"><div><h2>Current activity</h2>
 <p>Observed {esc(activity["observed_at"])} · Controller {esc(activity["controller"])}</p>
@@ -242,7 +252,7 @@ def render_activity(activity: dict[str, Any] | None) -> str:
 <p>Latest completed module: <code>{esc(build.get("latest_module") or "Not recorded")}</code><br>
 <small>Build log last changed: {esc(build.get("last_activity") or "Not recorded")}</small></p>
 <p>Dependency compilation is setup progress, not mathematical proof completion.</p>
-<ul>{workers}</ul></div></section>"""
+<ul>{workers}</ul>{pollers}</div></section>"""
 
 
 def render_catalog(entries: list[dict[str, Any]]) -> str:

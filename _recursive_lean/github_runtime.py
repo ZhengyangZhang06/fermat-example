@@ -9,11 +9,14 @@ import os
 import subprocess
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from .github import GitHubClient, PublicationError, repository_from_url
+from .issue_workers import ChildrenQueued, IssueWorkerPool
+from .live_status import process_identity
 from .local_problem import prepare_local_problem
 from .models import Decomposition, LeanAudit, NaturalProof, NodeRecord, SolveResult
 from .runtime import Runtime
@@ -54,6 +57,96 @@ class GitHubTheoremRuntime(Runtime):
         if not self.config.local_problem:
             return super()._bootstrap()
         return prepare_local_problem(self)
+
+    def _execute_graph(self, root):
+        if self.config.github_worker_mode != "poll":
+            return super()._execute_graph(root)
+        self.issue_workers = IssueWorkerPool(self)
+        return self.issue_workers.run(root)
+
+    def _adopt_issue_work(self, node):
+        """Resume a known local RLCR process without touching its active worktree."""
+        receipt = self._node_dir(node) / "rlcr-process.json"
+        if not receipt.is_file():
+            return None
+        record = json.loads(receipt.read_text())
+        if record.get("consumed"):
+            return None
+        if not record.get("pid") or not record.get("start_ticks"):
+            raise RuntimeError(
+                "RLCR launch identity is incomplete; reconcile the process before retrying"
+            )
+        if (
+            record.get("node_id") != node.id
+            or Path(record["worktree"]).resolve() != Path(node.worktree).resolve()
+        ):
+            raise RuntimeError("RLCR adoption identity does not match the frozen node")
+        worktree = Path(node.worktree)
+        pid, identity = int(record["pid"]), record["start_ticks"]
+        while identity and process_identity(pid) == identity:
+            self._check_workflow_health()
+            time.sleep(5)
+        # An orphan's exit code is unavailable. Require its own complete marker,
+        # then still rerun every outer acceptance gate. Never equate PID exit with proof.
+        directories = (
+            [Path(record["rlcr_directory"])]
+            if record.get("rlcr_directory")
+            else [
+                p
+                for p in (worktree / ".humanize/rlcr").glob("*")
+                if p.is_dir() and str(p) not in record.get("existing_rlcr_dirs", [])
+            ]
+        )
+        complete = any((p / "complete-state.md").is_file() for p in directories)
+        if record.get("returncode") != 0 and not complete:
+            result = SolveResult(
+                ok=False,
+                node_id=node.id,
+                feedback="adopted RLCR ended without confirmed completion; candidate preserved for repair",
+            )
+        else:
+            result = self._finish_rlcr_candidate(node, worktree, record["before"])
+        record["consumed"] = True
+        atomic_text(receipt, json.dumps(record, indent=2) + "\n")
+        return result
+
+    def _ensure_polling_issue(self, root):
+        if root.natural_proof:
+            self._sync_issues([root])
+            return
+        result = self.github.issue(
+            self._marker(root, "issue"),
+            f"[Theorem {root.id}] {root.title}",
+            f"Node: `{root.id}`\n\n## Lean problem\n\n```lean\n{self.publication_context['contract']}\n```\n\n"
+            "## Natural-language proof\n\nPending: an autonomous issue worker will prepare the proof and obtain independent review.\n\n"
+            "## Execution\n\nEight workers independently poll open theorem issues. This issue is not a proof or an acceptance record.\n",
+        )
+        root.github_issue_url = result["html_url"]
+        self.store.render()
+
+    def _handoff_published_children(self, parent, made):
+        if self.config.github_worker_mode != "poll":
+            return None
+        if all(self._accepted_checkpoint(node) for node in made.values()):
+            return [
+                SolveResult(
+                    ok=True, node_id=node.id, theorems=self._checkpoint_theorems(node)
+                )
+                for node in made.values()
+            ]
+        self.store.update(
+            parent.id,
+            "waiting-children",
+            "child issues published; autonomous workers will discover them by polling",
+        )
+        self._sync_issues([parent])
+        raise ChildrenQueued(parent.id)
+
+    def _speculation_enabled(self):
+        # Parents yield their slots instead of spawning push-assigned speculation.
+        return (
+            self.config.github_worker_mode != "poll" and super()._speculation_enabled()
+        )
 
     def _problem_context(self) -> str:
         if not self.config.local_problem:

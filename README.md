@@ -12,6 +12,12 @@ links, published to GitHub Pages. The original default workflow remains availabl
 See [the GitHub theorem workflow guide](docs/github-theorem-workflow.md) and
 [its example configuration](config.github-theorems.example.yaml).
 
+The GitHub theorem workflow now defaults to **eight autonomous issue-polling
+workers**, with no per-job notifications from a parent or another worker. See
+[polling, ownership and restart safety](docs/issue-polling-workers.md). The
+push-dispatch scheduler described later remains available in `dispatch` mode;
+the proof and independent verification gates are shared by both modes.
+
 > **Parent-supplied-child-proof + GitHub-workspace variant.** This branch is intended for fresh runs. It is
 > deliberately not compatible with child nodes created by the original workflow: an existing
 > child without a reviewed `parent-child-handoff.json` fails closed instead of generating its own
