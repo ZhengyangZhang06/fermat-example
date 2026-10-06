@@ -4,13 +4,13 @@
   "run": "20261006T035907Z-f6caab1a65",
   "repository": "ZhengyangZhang06/fermat-example",
   "statement": "∀ {k : Type*} [Field k] [IsAlgClosed k] [DecidableEq k] (p : ℕ) [Fact p.Prime] [CharP k p] (W : WeierstrassCurve k) [W.IsElliptic] {β : W.toAffine.Point →+ W.toAffine.Point}, β ∈ WeierstrassCurve.rationalHomSet k W W → ∀ (t q : ℤ), β.comp β + q • AddMonoidHom.id _ = t • β → (∀ m : ℤ, m ^ 2 - t * m + q ≠ 0) → (p : ℤ) ∣ q → ¬ (p : ℤ) ∣ t → ∃ T : W.toAffine.Point, T ≠ 0 ∧ p • T = 0",
-  "updated_at": "2026-10-06T07:34:42Z",
+  "updated_at": "2026-10-06T07:44:53Z",
   "lifecycle": "running",
   "phase": "In progress",
   "graph_ok": true,
   "total": 4,
   "verified": 1,
-  "accepted": 1,
+  "accepted": 2,
   "pull_requests": 1,
   "nodes": [
     {
@@ -50,7 +50,7 @@
       "issue_url": "https://github.com/ZhengyangZhang06/fermat-example/issues/4",
       "pr_url": "https://github.com/ZhengyangZhang06/fermat-example/pull/5",
       "pr_state": "open",
-      "pr_checked_at": "2026-10-06T07:34:42Z",
+      "pr_checked_at": "2026-10-06T07:44:53Z",
       "updated_at": "2026-10-06T07:06:45Z",
       "candidate_commit": "7e932c7ca686696f61119994f269b94e2ee5baea",
       "integrated_commit": "28546587378e4dccec7d6b465970ac650d352052"
@@ -63,15 +63,15 @@
       "depth": 1,
       "parent": "root",
       "requires": [],
-      "status": "lean-review",
+      "status": "integrating",
       "active": true,
-      "accepted": false,
+      "accepted": true,
       "issue_url": "https://github.com/ZhengyangZhang06/fermat-example/issues/2",
       "pr_url": "",
       "pr_state": "not checked",
       "pr_checked_at": "",
-      "updated_at": "2026-10-06T07:34:02Z",
-      "candidate_commit": "",
+      "updated_at": "2026-10-06T07:37:57Z",
+      "candidate_commit": "bbf7c6a4eef784614d5fc1e208a6f40a9120542e",
       "integrated_commit": ""
     },
     {
@@ -84,14 +84,14 @@
       "requires": [
         "root.no_integer_scalar_relation-a1"
       ],
-      "status": "waiting-lean",
+      "status": "rlcr-lean",
       "active": true,
       "accepted": false,
       "issue_url": "https://github.com/ZhengyangZhang06/fermat-example/issues/3",
       "pr_url": "",
       "pr_state": "not checked",
       "pr_checked_at": "",
-      "updated_at": "2026-10-06T04:24:10Z",
+      "updated_at": "2026-10-06T07:38:47Z",
       "candidate_commit": "",
       "integrated_commit": ""
     }
