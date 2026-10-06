@@ -1,0 +1,14 @@
+{
+  "node_id": "root.finite_kernel_torsion-a1",
+  "issue": "https://github.com/ZhengyangZhang06/fermat-example/issues/4",
+  "solution_pr": "see this branch's pull request",
+  "candidate_commit": "7e932c7ca686696f61119994f269b94e2ee5baea",
+  "integrated_commit": "28546587378e4dccec7d6b465970ac650d352052",
+  "proof_base_commit": "f0dfd5b77fe8cdaca1069daa98b4cd652163528a",
+  "comparator_command": "/home/ubuntu/.local/bin/python3.12 /mnt/data/zhengyang-workspace/fermat-example/tools/verify-node.py",
+  "required_success_marker": "Your solution is okay!",
+  "machine_comparator_passed": true,
+  "reviewer_comparator_passed": true,
+  "parent": "root",
+  "requires": []
+}
