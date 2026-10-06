@@ -80,8 +80,14 @@ def configure(directory, *, mathlib=True):
         raise RuntimeError("unsupported Lean module name in verifier input")
     write(
         directory / "lakefile.lean",
-        "import Lake\nopen Lake DSL\npackage verification\n"
-        + "".join(f"lean_lib {root}\n" for root in roots),
+        # These are the frozen project's elaboration options, not candidate input.
+        "import Lake\nopen Lake DSL\npackage verification where\n"
+        "  leanOptions := #[\n"
+        "    ⟨`autoImplicit, false⟩,\n"
+        "    ⟨`maxHeartbeats, (4000000 : Nat)⟩,\n"
+        "    ⟨`synthInstance.maxHeartbeats, (400000 : Nat)⟩,\n"
+        "    ⟨`backward.isDefEq.respectTransparency.types, false⟩\n"
+        "  ]\n\n" + "".join(f"lean_lib {root}\n" for root in roots),
     )
     write(directory / "lean-toolchain", "leanprover/lean4:v4.33.1\n")
     write(
@@ -196,15 +202,38 @@ def compare(root, name, *, mathlib=True):
 
 
 def self_test():
-    for title, candidate, accepted in [
-        ("valid", "theorem toy : True := True.intro", True),
-        ("changed-type", "theorem toy : False → False := fun h => h", False),
-        ("sorry", "theorem toy : True := by sorry", False),
-        ("extra-axiom", "axiom assumed : True\ntheorem toy : True := assumed", False),
+    ordinary_challenge = "theorem toy : True := by sorry\n"
+    for title, challenge, candidate, accepted in [
+        ("valid", ordinary_challenge, "theorem toy : True := True.intro", True),
+        (
+            "changed-type",
+            ordinary_challenge,
+            "theorem toy : False → False := fun h => h",
+            False,
+        ),
+        ("sorry", ordinary_challenge, "theorem toy : True := by sorry", False),
+        (
+            "extra-axiom",
+            ordinary_challenge,
+            "axiom assumed : True\ntheorem toy : True := assumed",
+            False,
+        ),
+        (
+            "shared-definition",
+            "def ContractProp : Prop := True\ntheorem toy : ContractProp := by sorry",
+            "def ContractProp : Prop := True\ntheorem toy : ContractProp := True.intro",
+            True,
+        ),
+        (
+            "changed-definition",
+            "def ContractProp : Prop := False\ntheorem toy : ContractProp := by sorry",
+            "def ContractProp : Prop := True\ntheorem toy : ContractProp := True.intro",
+            False,
+        ),
     ]:
         with tempfile.TemporaryDirectory(prefix="deuring-comparator-test-") as tmp:
             root = Path(tmp)
-            write(root / "challenge/Challenge.lean", "theorem toy : True := by sorry\n")
+            write(root / "challenge/Challenge.lean", challenge + "\n")
             write(root / "solution/Solution.lean", candidate + "\n")
             try:
                 compare(root, "toy", mathlib=False)

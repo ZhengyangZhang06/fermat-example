@@ -8,6 +8,12 @@
   "comparator_patch": "comparator-exports.patch",
   "comparator_toolchain_override": "v4.33.1",
   "lean4export_toolchain_override": "v4.33.1",
+  "frozen_elaboration_options": {
+    "autoImplicit": false,
+    "maxHeartbeats": 4000000,
+    "synthInstance.maxHeartbeats": 400000,
+    "backward.isDefEq.respectTransparency.types": false
+  },
   "landrun_build": "CGO_ENABLED=0 go1.25.1 build ./cmd/landrun",
   "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
   "nanoda": false,
