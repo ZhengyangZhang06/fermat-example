@@ -8,6 +8,13 @@ latency can add delay. The page warns after three minutes without an observation
 and on fetch failures. Neither refreshing a page nor publishing a heartbeat
 means a theorem has advanced or passed verification.
 
+GitHub's raw-file CDN ignores query-string cache busters. The publisher therefore
+also writes current/upcoming minute paths, before browsers first request them.
+The browser checks the current minute path plus the canonical fallback and uses
+the newest observation. This advances roughly once a minute without relying on
+cache invalidation, authentication, or rate-limited GitHub API calls. Old tick
+files leave the branch's current tree after ten minutes (Git history retains them).
+
 The observer reads the saved DAG, process identity, dependency readiness/failure
 markers, build job counts, and worker log modification times. It never publishes
 raw logs, prompts, local paths, or credentials. A PID's start time is checked to

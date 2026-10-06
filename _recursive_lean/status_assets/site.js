@@ -120,9 +120,22 @@ async function poll() {
   fetching = true;
   try {
     if (!liveURL) throw new Error("no live endpoint");
-    const response = await fetch(`${liveURL}?t=${Date.now()}`, {cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(15000)});
-    if (!response.ok) throw new Error("live feed unavailable");
-    replaceSnapshot(await response.json());
+    // GitHub's CDN ignores query-string cache busters for mutable raw files.
+    // The publisher prepopulates minute paths, so changing the path every minute
+    // yields a fresh cache key. The canonical file is a fallback, never evidence
+    // of freshness on its own. Apply the newest successful observation only.
+    const bucket = new Date().toISOString().slice(0, 16).replace(/[-:]/g, "");
+    const urls = [liveURL.replace("/live.json", `/ticks/${bucket}.json`), liveURL];
+    const responses = await Promise.allSettled(urls.map(async url => {
+      const response = await fetch(url, {cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(15000)});
+      if (!response.ok) throw new Error("live feed unavailable");
+      return response.json();
+    }));
+    const feeds = responses.filter(one => one.status === "fulfilled").map(one => one.value)
+      .filter(one => one.snapshot?.repository === repository && one.snapshot?.run === run)
+      .sort((a, b) => Date.parse(b.snapshot.updated_at) - Date.parse(a.snapshot.updated_at));
+    if (!feeds.length) throw new Error("live feed unavailable");
+    replaceSnapshot(feeds[0]);
     fetchFailed = false;
   } catch (_) {
     fetchFailed = true;

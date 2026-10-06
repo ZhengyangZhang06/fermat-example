@@ -179,6 +179,32 @@ class LiveBranch:
                     "live-site.json": MARKER,
                     f"{path}/live.json": json.dumps(payload, ensure_ascii=False) + "\n",
                 }
+                # raw.githubusercontent.com ignores cache-busting query strings.
+                # Prepopulate upcoming minute paths before browsers request them;
+                # each minute then has a fresh cache key without GitHub API tokens.
+                stamp = dt.datetime.fromisoformat(
+                    payload.get("snapshot", {})
+                    .get("updated_at", now())
+                    .replace("Z", "+00:00")
+                )
+                for offset in range(3):
+                    bucket = (stamp + dt.timedelta(minutes=offset)).strftime(
+                        "%Y%m%dT%H%M"
+                    )
+                    files[f"{path}/ticks/{bucket}.json"] = files[f"{path}/live.json"]
+                if base:
+                    cutoff = (stamp - dt.timedelta(minutes=10)).strftime("%Y%m%dT%H%M")
+                    for old in self.git(
+                        "ls-tree", "-r", "--name-only", base, "--", f"{path}/ticks/"
+                    ).stdout.splitlines():
+                        name = old.removeprefix(f"{path}/ticks/")
+                        if (
+                            re.fullmatch(r"\d{8}T\d{4}\.json", name)
+                            and name[:-5] < cutoff
+                        ):
+                            self.git(
+                                "update-index", "--force-remove", "--", old, env=env
+                            )
                 for name, content in files.items():
                     blob = self.git(
                         "hash-object", "-w", "--stdin", input=content

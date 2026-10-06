@@ -70,13 +70,18 @@ class LiveBrowserTests(unittest.TestCase):
                 ),
             )
             offline = False
+            cached_canonical = json.dumps(feed)
 
             def serve(route):
                 if offline:
                     route.abort()
                 else:
                     route.fulfill(
-                        body=json.dumps(feed),
+                        # Model GitHub's stale canonical cache. Only minute-path
+                        # observations advance, even when both requests succeed.
+                        body=json.dumps(feed)
+                        if "/ticks/" in route.request.url
+                        else cached_canonical,
                         content_type="application/json",
                         headers={"Access-Control-Allow-Origin": "*"},
                     )
