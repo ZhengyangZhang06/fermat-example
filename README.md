@@ -17,5 +17,7 @@ Every run generates a local status website and attempts GitHub Pages publication
 Network search is disabled. Direct Git hosting and dependency downloads are allowed.
 Model execution must use `/home/zhengyang/.codex`; never substitute a provider.
 
-See [problem status](proofs/deuring-criterion/index.md) for the current blockers.
+See [problem status](proofs/deuring-criterion/index.md) for the actual run checkpoint
+and current blockers, and the [website snapshot](docs/status/theorem-status/index.html)
+for the generated paused status. Pages hosting is pending API authentication.
 This bootstrap commit is not a solution or evidence of successful verification.
