@@ -43,6 +43,11 @@ every ten minutes during the run and at its final checkpoint.
   tests pass: valid proofs with and without a shared definition are accepted;
   changed statements, sorryAx, added axioms, and changed dependent definitions
   are rejected. Isolated builds use the frozen project's elaboration options.
+- Five dependency-integrity tests pass: exact revisions and ignored build output
+  are accepted; changed revisions, tracked source edits, and untracked source
+  additions are rejected. Every verification rechecks all nine pinned dependency
+  checkouts against the frozen lockfile before and after kernel checking, and
+  records the verifier source's SHA-256 digest.
 - Humanize's compatible planning/review flow is pinned to official flowverse
   revision `029c808b78f237daa624d798ae00843c2b0ca094`.
 - GitHub Pages is serving the `gh-pages` branch. Earlier paused snapshots remain

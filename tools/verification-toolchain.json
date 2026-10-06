@@ -17,6 +17,12 @@
   "landrun_build": "CGO_ENABLED=0 go1.25.1 build ./cmd/landrun",
   "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
   "nanoda": false,
-  "checks": ["frozen statement and context equality", "transitive axioms", "Lean kernel replay"],
+  "checks": [
+    "frozen statement and context equality",
+    "transitive axioms",
+    "Lean kernel replay",
+    "pinned clean dependency sources before and after verification",
+    "unchanged verifier source with SHA-256 evidence"
+  ],
   "sandbox": "Landlock best-effort on ABI v4 plus systemd RestrictAddressFamilies=~AF_UNIX"
 }

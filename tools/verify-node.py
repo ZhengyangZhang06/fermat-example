@@ -8,6 +8,7 @@ verifyMatch performs statement/context equality, axiom checks and kernel replay.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -66,6 +67,23 @@ def copy_revision(repo, revision, target):
     for name in git(repo, "ls-tree", "-r", "--name-only", revision).splitlines():
         if name.endswith(".lean") and name != "lakefile.lean":
             write(target / name, git(repo, "show", f"{revision}:{name}"))
+
+
+def check_dependency_sources(packages_dir, manifest):
+    """Check pinned source revisions; generated ignored build artifacts are allowed."""
+    revisions = {}
+    for package in manifest["packages"]:
+        name = package["name"]
+        if package["type"] != "git" or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise RuntimeError(f"unsupported frozen dependency: {name}")
+        checkout = packages_dir / name
+        actual = git(checkout, "rev-parse", "HEAD").strip()
+        if actual != package["rev"]:
+            raise RuntimeError(f"dependency revision changed: {name}")
+        if git(checkout, "status", "--porcelain").strip():
+            raise RuntimeError(f"dependency source checkout is not clean: {name}")
+        revisions[name] = actual
+    return revisions
 
 
 def configure(directory, *, mathlib=True):
@@ -252,6 +270,11 @@ def verify():
     run_root = Path(os.environ["HUMANIZE_RUN_DIR"]).resolve()
     node_id = os.environ["HUMANIZE_NODE_ID"]
     context = json.loads((run_root / "github-workflow.json").read_text())
+    manifest = json.loads(
+        git(PROJECT, "show", f"{context['source_commit']}:lake-manifest.json")
+    )
+    dependencies = check_dependency_sources(PROJECT / ".lake/packages", manifest)
+    verifier_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     dag = json.loads((run_root / "dag.json").read_text())
     node = next(n for n in dag["nodes"] if n["id"] == node_id)
     candidate = Path.cwd()
@@ -294,6 +317,8 @@ def verify():
                 "root_contract_commit": context["source_commit"],
                 "lean_toolchain": "v4.33.1",
                 "permitted_axioms": AXIOMS,
+                "dependency_revisions": dependencies,
+                "verifier_sha256": verifier_digest,
                 "status": "checking",
             },
             indent=2,
@@ -304,6 +329,10 @@ def verify():
         root / "solution/AxiomReport.lean", f"import Solution\n#print axioms {name}\n"
     )
     sandbox(root / "solution", ["lake", "env", "lean", "AxiomReport.lean"])
+    if check_dependency_sources(PROJECT / ".lake/packages", manifest) != dependencies:
+        raise RuntimeError("dependency revisions changed during verification")
+    if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != verifier_digest:
+        raise RuntimeError("verifier source changed during verification")
     evidence = json.loads((root / "evidence.json").read_text())
     evidence["status"] = "verified"
     write(root / "evidence.json", json.dumps(evidence, indent=2))
