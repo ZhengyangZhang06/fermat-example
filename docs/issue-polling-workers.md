@@ -8,6 +8,10 @@ No parent or other worker sends it a job notification. A decomposition publishes
 child issues and Git handoffs, then releases its worker slot. Parents become
 eligible again once their prerequisites pass the existing acceptance gates.
 
+An existing candidate rejected by the outer reviewer returns directly to Lean
+repair with the retained rejection in its implementation plan. It does not reopen
+the accepted mathematical proof or decompose the same theorem again.
+
 ```yaml
 github_worker_mode: poll
 github_issue_workers: 8

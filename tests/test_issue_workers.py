@@ -169,6 +169,19 @@ class PollingTests(unittest.TestCase):
         self.assertEqual(self.solves, [])
         self.runtime._adopt_issue_work.assert_called_once_with(self.root)
 
+    def test_existing_candidate_retries_formalization_without_decomposition(self):
+        self.root.worktree = str(self.project)
+        self.root.plan = "accepted-plan.md"
+        self.root.natural_proof = "accepted-proof.md"
+        self.runtime._solve = Mock(
+            side_effect=AssertionError("must not reopen decomposition")
+        )
+        self.runtime._formalize_checkpoint_parent = Mock(
+            return_value=SolveResult(ok=True, node_id="root")
+        )
+        self.assertTrue(self.pool.poll_once("worker-01"))
+        self.runtime._formalize_checkpoint_parent.assert_called_once_with(self.root)
+
     def test_child_waits_for_immutable_handoff(self):
         child = NodeRecord(
             id="root.child", parent="root", depth=1, title="Child", statement="True"

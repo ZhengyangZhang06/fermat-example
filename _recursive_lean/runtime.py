@@ -3496,6 +3496,7 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         """Render the comparator with explicit controller paths for isolated worktrees."""
         token_environment = getattr(self.config, "huggingface_token_env", "HF_TOKEN")
         environment = (
+            f"HUMANIZE_NODE_ID={shlex.quote(node.id)} "
             f"HUMANIZE_RUN_DIR={shlex.quote(str(self.run_root))} "
             f"HUMANIZE_WIKI_DIR={shlex.quote(str(self.store.wiki))} "
             f"HUMANIZE_PROBLEM_MARKDOWN={shlex.quote(str(self.problem_path))} "
@@ -5406,6 +5407,16 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
     ) -> Path:
         """Give nested RLCR only the work it can finish before returning control."""
         path = self._node_dir(node) / f"rlcr-plan-v{max(node.lean_attempts, 1)}.md"
+        feedback = "No retained outer-review rejection."
+        audits = sorted(
+            self._node_dir(node).glob("lean-audit-v*.json"),
+            key=lambda p: p.stat().st_mtime_ns,
+            reverse=True,
+        )
+        if audits:
+            audit = LeanAudit.model_validate_json(audits[0].read_text())
+            if not audit.passed:
+                feedback = self._lean_feedback(audit)
         content = f"""# Implement Lean DAG node `{node.id}`
 
 ## Frozen problem acquisition
@@ -5436,6 +5447,10 @@ override the current DAG, trigger planning, add or replace child nodes, or inval
 comparator-approved implementation of this selected node.
 
 ## Nested RLCR tasks
+
+Latest outer-review feedback (repair this without reopening decomposition):
+
+{feedback}
 
 1. Read the accepted natural proof and, when useful, the scaffold's mathematical route.
    Implement only this node's exact declaration, using only the comparator-approved dependencies

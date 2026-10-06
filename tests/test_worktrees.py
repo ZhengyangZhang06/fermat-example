@@ -218,9 +218,7 @@ class WorktreeTests(unittest.TestCase):
             unresolved=[],
         )
         recovered = _structured_turn(
-            FailedAfterAnswer(
-                earlier.model_dump_json() + expected.model_dump_json()
-            ),
+            FailedAfterAnswer(earlier.model_dump_json() + expected.model_dump_json()),
             "prove it",
             NaturalProof,
         )
@@ -266,9 +264,7 @@ class WorktreeTests(unittest.TestCase):
         )
 
         recovered = _structured_turn(
-            StreamedAnswerAgent(
-                earlier.model_dump_json() + expected.model_dump_json()
-            ),
+            StreamedAnswerAgent(earlier.model_dump_json() + expected.model_dump_json()),
             "prove it",
             NaturalProof,
         )
@@ -308,9 +304,7 @@ class WorktreeTests(unittest.TestCase):
         )
         recovered = _structured_turn(
             _WorkspaceAgent(
-                StreamedAnswerAgent(
-                    earlier.model_dump_json() + '{"reference_use": ['
-                ),
+                StreamedAnswerAgent(earlier.model_dump_json() + '{"reference_use": ['),
                 Path.cwd(),
             ),
             "prove it",
@@ -328,9 +322,7 @@ class WorktreeTests(unittest.TestCase):
             unresolved=[],
         )
         recovered = _structured_turn(
-            FailedAfterAnswer(
-                earlier.model_dump_json() + '{"reference_use": ['
-            ),
+            FailedAfterAnswer(earlier.model_dump_json() + '{"reference_use": ['),
             "prove it",
             NaturalProof,
         )
@@ -548,13 +540,10 @@ class WorktreeTests(unittest.TestCase):
                 self.assertTrue(any("web_search=on" in part for part in command))
                 rlcr_config = json.loads(
                     (
-                        runtime._node_dir(node)
-                        / f"rlcr-config-v{node.attempts}.json"
+                        runtime._node_dir(node) / f"rlcr-config-v{node.attempts}.json"
                     ).read_text()
                 )
-                self.assertEqual(
-                    rlcr_config["base_branch"], "frozen-post-overlay-base"
-                )
+                self.assertEqual(rlcr_config["base_branch"], "frozen-post-overlay-base")
             finally:
                 os.chdir(original)
 
@@ -584,6 +573,21 @@ class WorktreeTests(unittest.TestCase):
                 scaffold.write_text("# Historical speculative decomposition\n")
                 natural = project / "natural-proof.md"
                 natural.write_text("# Accepted mathematical proof\n")
+                (runtime._node_dir(node) / "lean-audit-v1.json").write_text(
+                    json.dumps(
+                        {
+                            "reference_use": reference_use(),
+                            "accepted": False,
+                            "comparator_reran": True,
+                            "comparator_passed": True,
+                            "proof_matches_statement": True,
+                            "issues": [
+                                "Restore the inherited root placeholder unchanged."
+                            ],
+                            "theorems": [],
+                        }
+                    )
+                )
                 with patch.object(
                     runtime,
                     "_review_command",
@@ -597,6 +601,14 @@ class WorktreeTests(unittest.TestCase):
                     ).read_text()
 
                 self.assertIn("Authoritative selected-node contract", implementation)
+                with patch.object(runtime, "_render_command", return_value="checker"):
+                    self.assertIn(
+                        "HUMANIZE_NODE_ID=root.selected-a1",
+                        runtime._review_command(node, []),
+                    )
+                self.assertIn(
+                    "Restore the inherited root placeholder unchanged.", implementation
+                )
                 self.assertIn("override the current DAG", implementation)
                 self.assertIn(
                     "DAG shape, extra certification interface", implementation
@@ -604,10 +616,15 @@ class WorktreeTests(unittest.TestCase):
                 self.assertIn("authoritative implementation boundary", RLCR_LEAN_TASK)
                 self.assertIn("do not reopen planning or decomposition", RLCR_LEAN_TASK)
                 self.assertIn("Frozen proof-base commit", RLCR_LEAN_TASK)
-                self.assertIn("empty list does not ban proof-base helpers", RLCR_LEAN_TASK)
+                self.assertIn(
+                    "empty list does not ban proof-base helpers", RLCR_LEAN_TASK
+                )
                 self.assertIn("Preserve that inherited placeholder", RLCR_LEAN_TASK)
                 self.assertIn("introduces no new warning", RLCR_LEAN_TASK)
-                self.assertIn("cannot distinguish the expected inherited root warning", RLCR_LEAN_TASK)
+                self.assertIn(
+                    "cannot distinguish the expected inherited root warning",
+                    RLCR_LEAN_TASK,
+                )
             finally:
                 os.chdir(original)
 
@@ -855,7 +872,9 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
-    def test_resume_after_natural_acceptance_reuses_proof_before_decomposition(self) -> None:
+    def test_resume_after_natural_acceptance_reuses_proof_before_decomposition(
+        self,
+    ) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "accepted_natural_resume_problem"
@@ -908,7 +927,9 @@ class WorktreeTests(unittest.TestCase):
                     patch.object(
                         runtime,
                         "_accepted_natural_proof",
-                        side_effect=AssertionError("accepted prose must not be regenerated"),
+                        side_effect=AssertionError(
+                            "accepted prose must not be regenerated"
+                        ),
                     ),
                     patch.object(
                         runtime, "_decompose", return_value=decomposition
@@ -1038,7 +1059,9 @@ class WorktreeTests(unittest.TestCase):
                 self.assertEqual(captured["node"], child.id)
                 self.assertEqual(captured["plan"], "parent-supplied-plan.md")
                 self.assertEqual(captured["proof"], subproblem.natural_proof)
-                self.assertTrue(child.parent_handoff.endswith("parent-child-handoff.json"))
+                self.assertTrue(
+                    child.parent_handoff.endswith("parent-child-handoff.json")
+                )
 
                 # The proof bundle is immutable. A changed proof must fail before any
                 # fallback planner or prose author is invoked.
@@ -1179,9 +1202,7 @@ class WorktreeTests(unittest.TestCase):
                 self.assertEqual(feedback, "")
                 self.assertTrue(parent.workspace_dispatch_branch)
                 self.assertTrue(parent.workspace_dispatch_commit)
-                dispatch_ref = (
-                    f"refs/heads/{parent.workspace_dispatch_branch}"
-                )
+                dispatch_ref = f"refs/heads/{parent.workspace_dispatch_branch}"
                 self.assertEqual(
                     git(remote, "rev-parse", dispatch_ref),
                     parent.workspace_dispatch_commit,
@@ -1195,7 +1216,9 @@ class WorktreeTests(unittest.TestCase):
                 manifest = GitWorkspaceDispatch.model_validate_json(manifest_text)
                 self.assertEqual(manifest.parent_id, parent.id)
                 self.assertEqual(len(manifest.children), 2)
-                self.assertEqual(first.proof_base_commit, parent.workspace_dispatch_commit)
+                self.assertEqual(
+                    first.proof_base_commit, parent.workspace_dispatch_commit
+                )
 
                 handoff = json.loads((project / first.parent_handoff).read_text())
                 local_paths = [
@@ -1617,16 +1640,12 @@ class WorktreeTests(unittest.TestCase):
                         attempts=1,
                     )
                 )
-                (worktree / "Submission.lean").write_text(
-                    "theorem value : Nat := 1\n"
-                )
+                (worktree / "Submission.lean").write_text("theorem value : Nat := 1\n")
                 git(worktree, "add", "Submission.lean")
                 git(worktree, "commit", "-m", "feat: candidate value")
                 candidate = runtime._git_head(worktree)
 
-                (project / "Submission.lean").write_text(
-                    "theorem value : Nat := 2\n"
-                )
+                (project / "Submission.lean").write_text("theorem value : Nat := 2\n")
                 git(project, "add", "Submission.lean")
                 git(project, "commit", "-m", "feat: canonical value")
 
@@ -1956,14 +1975,13 @@ class WorktreeTests(unittest.TestCase):
                     SolveResult(ok=True, node_id=node.id),
                 ]
 
-                with patch.object(
-                    runtime, "_formalize", side_effect=outcomes
-                ) as formalize, patch.object(
-                    runtime, "_accepted_natural_proof"
-                ) as reopen_prose:
-                    result = runtime._formalize_until_accepted(
-                        node, plan, natural, []
-                    )
+                with (
+                    patch.object(
+                        runtime, "_formalize", side_effect=outcomes
+                    ) as formalize,
+                    patch.object(runtime, "_accepted_natural_proof") as reopen_prose,
+                ):
+                    result = runtime._formalize_until_accepted(node, plan, natural, [])
 
                 self.assertTrue(result.ok)
                 self.assertEqual(formalize.call_count, 2)
@@ -2034,7 +2052,9 @@ class WorktreeTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
-    def test_interrupted_cherry_pick_is_audited_and_aborted_before_overlay(self) -> None:
+    def test_interrupted_cherry_pick_is_audited_and_aborted_before_overlay(
+        self,
+    ) -> None:
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "interrupted_cherry_pick_problem"
@@ -2331,7 +2351,9 @@ class WorktreeTests(unittest.TestCase):
 
                 self.assertEqual(len(results), 1)
                 self.assertFalse(results[0].ok)
-                self.assertIn("already reserved by active DAG node", results[0].feedback)
+                self.assertIn(
+                    "already reserved by active DAG node", results[0].feedback
+                )
                 self.assertEqual(second_parent.children, [])
             finally:
                 os.chdir(original)
@@ -2749,9 +2771,7 @@ class WorktreeTests(unittest.TestCase):
                 parent.plan = str(plan.relative_to(project))
                 parent.natural_proof = str(natural.relative_to(project))
 
-                def draft(
-                    node: NodeRecord, worktree: Path, prompt: str
-                ) -> str:
+                def draft(node: NodeRecord, worktree: Path, prompt: str) -> str:
                     del node
                     self.assertIn("Submission.child_theorem : True", prompt)
                     target = worktree / "Submission.lean"

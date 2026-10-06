@@ -199,6 +199,7 @@ class IssueWorkerPool:
                         result = (
                             runtime._formalize_checkpoint_parent(node)
                             if node.children
+                            or (node.worktree and node.plan and node.natural_proof)
                             else runtime._solve(node)
                         )
                     if not result.ok:
