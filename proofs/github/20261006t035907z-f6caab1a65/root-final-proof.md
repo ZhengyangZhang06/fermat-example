@@ -59,8 +59,12 @@ historical review records remain unchanged. The actual root wrapper and its
 46-module upstream closure are unchanged. This repair also removes two duplicate
 placeholder root stubs and a redundant triply nested finite-kernel child copy
 found in the inherited candidate; none is used in the proof. The original child
-declaration is preserved, and Submission.lean is byte-identical to reviewed commit
-`0282bd68f3c063655577284abe3fb609b2590906`. No new named helper theorem is introduced.
+declaration is preserved. Relative to reviewed commit
+`0282bd68f3c063655577284abe3fb609b2590906`, one extra `namespace Submission`
+opening was also removed so the two arithmetic children retain their exact
+comparator-approved names, `Submission.deuring_no_integer_scalar_relation_f6caab1a65`
+and `Submission.deuring_trace_norm_unique_f6caab1a65`. Their types and proof bodies
+are unchanged. No new named helper theorem is introduced.
 
 A reviewer must read this file from the exact committed candidate, compare each
 step with the Lean source, and record this path's Git blob only after independent
