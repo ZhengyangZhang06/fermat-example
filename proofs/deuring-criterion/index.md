@@ -5,17 +5,50 @@ Frozen contract: [DeuringCriterionStatement.lean](../../DeuringCriterionStatemen
 Workflow repository: `ZhengyangZhang06/fermat-example`.
 Target branch: `main`.
 Root issue: [#1](https://github.com/ZhengyangZhang06/fermat-example/issues/1).
-Root solution PR: not opened; proof verification pending.
+Root solution PR: [#8](https://github.com/ZhengyangZhang06/fermat-example/pull/8), merged into `main` on 2026-10-06.
 Pinned Lean toolchain: Lean 4.33.1, installed.
 
-| Theorem ID | Parent | Requires | Issue | Solution PR | State | Evidence |
+| Theorem ID | Parent | Workflow requires | Issue | Solution PR | State | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| root | none | children below; geometric obligations remain | [#1](https://github.com/ZhengyangZhang06/fermat-example/issues/1) | pending | waiting for children | prose and decomposition reviewed; no accepted Lean proof |
-| root.no_integer_scalar_relation-a1 | root | none | [#2](https://github.com/ZhengyangZhang06/fermat-example/issues/2) | pending | candidate under verification | minimal-harness checks only; full comparator pending |
-| root.trace_norm_uniqueness-a1 | root | root.no_integer_scalar_relation-a1 | [#3](https://github.com/ZhengyangZhang06/fermat-example/issues/3) | pending | waiting for prerequisite | exact contract and prose reviewed |
-| root.finite_kernel_torsion-a1 | root | none | [#4](https://github.com/ZhengyangZhang06/fermat-example/issues/4) | pending | candidate under verification | full build and comparator pending |
+| root | none | three child records below | [#1](https://github.com/ZhengyangZhang06/fermat-example/issues/1) | [#8](https://github.com/ZhengyangZhang06/fermat-example/pull/8) | merged; issue closed | exact comparator, fresh review, combined integration |
+| root.no_integer_scalar_relation-a1 | root | none | [#2](https://github.com/ZhengyangZhang06/fermat-example/issues/2) | [#6](https://github.com/ZhengyangZhang06/fermat-example/pull/6) | merged; issue closed | comparator, independent rerun, integration |
+| root.trace_norm_uniqueness-a1 | root | root.no_integer_scalar_relation-a1 | [#3](https://github.com/ZhengyangZhang06/fermat-example/issues/3) | [#7](https://github.com/ZhengyangZhang06/fermat-example/pull/7) | merged; issue closed | comparator, independent rerun, integration |
+| root.finite_kernel_torsion-a1 | root | none | [#4](https://github.com/ZhengyangZhang06/fermat-example/issues/4) | [#5](https://github.com/ZhengyangZhang06/fermat-example/pull/5) | merged; issue closed | comparator, independent rerun, integration |
 
-## Current run
+## Completed run
+
+Run `20261006T035907Z-f6caab1a65` delivered the exact root and all three child
+declarations. Child PRs merged into their frozen review bases; root PR #8 delivered
+the complete combined solution into `main`. See the
+[committed proof/audit index](../github/20261006t035907z-f6caab1a65/index.md) and
+[complete reviewed root proof](../github/20261006t035907z-f6caab1a65/root-final-proof.md).
+
+- Root candidate: `afa565773ef0d97a67e91156415200a30b8ea0e5`.
+- Verified integration: `9369aa39713e9ba069df5a2102f11c582f59ac30`.
+- Publication: `31e33459912d3f68e9efef2e63997890e2c4c1bd`.
+- Root merge: `5fe0bcd54d529271f1b79d58720a81d79a48eb2f`.
+- Independently reviewed prose blob: `1c0099cb85da4e4edc3a866bbb678399ec4662fb`.
+
+The merge tree exactly equals the verified publication tree. All four frozen
+contracts passed statement/context comparison, Lean kernel replay and transitive
+axiom checking, including the final combined integration. Only `propext`,
+`Classical.choice`, and `Quot.sound` occur. The original statement is unchanged.
+The fresh root reviewer independently reran the comparator and approved the exact
+committed prose blob. The 46 reused upstream modules retain their pinned provenance.
+
+The DAG records workflow prerequisites, not the root term's imported dependency
+closure: the actual root proof uses the upstream height/factorization route, not
+the earlier geometric G/D/K outline or the three historical child lemmas. Those
+children are still separately proved, published and preserved under their exact names.
+
+The workflow branch is `workflow/issue-polling-workers` at `0231d23`: eight
+independent same-host pollers, exclusive issue claims, restart-safe adoption,
+idempotent overlays, guarded automatic merge/closure, and a live colored DAG.
+All 138 workflow tests pass, including the browser test. The strengthened verifier's
+ten real isolated self-tests pass, including rejection of renamed children,
+changed statements, proof holes, extra axioms and altered shared definitions.
+
+## Historical checkpoint before proof acceptance
 
 Run `20261006T035907Z-f6caab1a65` passed local-input preflight, completed its
 one-time proof plan, and passed independent prose and decomposition review.
@@ -29,7 +62,7 @@ checkpoint; the live website reports subsequent controller state.
 GitHub Pages deployment has been confirmed built. The website is republished
 every ten minutes during the run and at its final checkpoint.
 
-## Startup requirements
+## Historical setup notes
 
 - Git SSH access to the specified repository is working.
 - GitHub API authentication is working as `ZhengyangZhang06`.
@@ -53,7 +86,7 @@ every ten minutes during the run and at its final checkpoint.
 - GitHub Pages is serving the `gh-pages` branch. Earlier paused snapshots remain
   historical records; the shared website index lists later runs as they start.
 
-## Mathematical status
+## Historical mathematical status (superseded)
 
 No proof has been verified in this experiment. A pre-existing upstream solution
 was found in the local source repository at revision
