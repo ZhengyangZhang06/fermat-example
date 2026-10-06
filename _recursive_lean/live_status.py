@@ -62,6 +62,9 @@ def build_observation(
         else "Not running; readiness unconfirmed"
     )
     completed, total = map(int, jobs[-1]) if jobs else (0, 0)
+    finished = re.findall(r"Build completed successfully \((\d+) jobs\)", tail)
+    if finished:
+        completed = total = int(finished[-1])
     return {
         "state": state,
         "completed": completed,

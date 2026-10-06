@@ -16,6 +16,16 @@ from _recursive_lean.live_status import (
 
 
 class LiveObservationTests(unittest.TestCase):
+    def test_final_build_summary_counts_the_terminal_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "build.log"
+            log.write_text(
+                "Built [8704/8705] Mathlib\nBuild completed successfully (8705 jobs).\n"
+            )
+            result = build_observation(log, running=False, ready=False, failed=False)
+            self.assertEqual((result["completed"], result["total"]), (8705, 8705))
+            self.assertEqual(result["state"], "Awaiting readiness check")
+
     def test_progress_is_not_proof_and_private_logs_are_not_published(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
