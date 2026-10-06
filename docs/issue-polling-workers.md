@@ -50,6 +50,11 @@ worker is not an active model session. `dispatch` retains the legacy scheduler.
   timestamp-based takeover. The OS releases them when their owner dies.
 - After claiming, each worker rechecks local dependencies and remote issue state.
 - Existing store, publication and integration locks serialize shared mutations.
+- Successful child-history applications have local Git receipts tied to their
+  resulting commit. A retry skips a receipt only when that commit is an ancestor
+  of the current worktree, preserving later proof repairs without accidentally
+  skipping an overlay on an unrelated branch. Receipts are not proof evidence;
+  combined-source verification is still required.
 - A durable RLCR receipt records PID plus Linux process start identity. After a
   supervisor restart, the claiming worker adopts the live process, leaving its
   worktree untouched. It does not launch a duplicate. An ambiguous spawn receipt
@@ -77,3 +82,8 @@ The independent Lean reviewer checks the final prose against the candidate and
 records its exact Git blob ID. Root acceptance rejects missing prose, absent
 review, or a mismatching blob. The issue and PR then use that reviewed candidate
 document, not the old outline. This does not weaken any comparator or axiom gate.
+
+The final combined solution must preserve every accepted child's exact qualified
+name and frozen type, including historical child lemmas unused by the root proof.
+The Deuring project's comparator exports and checks all retained theorem contracts
+together, so a valid root cannot hide a renamed child, changed type or proof hole.

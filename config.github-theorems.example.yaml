@@ -8,6 +8,9 @@ github_root_lean_statement: "∀ n : Nat, n + 0 = n"
 github_contract_file: Challenge.lean
 github_workspace_branch_prefix: humanize-workspace
 github_workspace_push_timeout: 300
+# Enable only after the user authorizes merging and closing proved theorem issues.
+github_auto_merge: false
+github_close_proved_issues: false
 
 # Each problem run gets a local status website and a GitHub Pages page.
 # Hosted snapshots update initially, every 10 minutes, and when the run ends.

@@ -48,9 +48,12 @@ references for the entire problem's theorem issues. GitHub applies those referen
 when the root is merged into the repository's default branch; a different target
 branch follows GitHub's normal closing-reference rules.
 
-The workflow never automatically merges a PR, closes an issue, force-pushes a
-branch, or updates the configured remote target branch. Ordinary pushes create
-immutable publication branches. PR publication appends a documentation commit to
+Automatic merging and issue closure are off by default. With explicit user
+authorization, enable `github_auto_merge` and `github_close_proved_issues`. The
+workflow checks the exact verified PR head and frozen base, requests a normal merge
+without bypassing branch protection, verifies the remote merge tree, and only then
+closes the matching theorem issue. It never force-pushes a branch. Ordinary pushes
+create immutable publication branches. PR publication appends a documentation commit to
 the exact accepted source tree; it does not edit the verified Lean files or the
 canonical local problem branch. Publication branches live below:
 
@@ -81,6 +84,11 @@ Copy `config.github-theorems.example.yaml` to the problem repository and set:
 | `github_root_lean_name` | Actual fully qualified root declaration, not a module name |
 | `github_root_lean_statement` | Exact single-line Lean type expression, without a declaration or proof |
 | `github_contract_file` | Tracked Lean source containing the original problem context |
+| `local_problem` | Freeze the supplied local contract instead of acquiring a Lean-Eval problem |
+| `github_worker_mode` | `poll` for autonomous issue discovery (default); `dispatch` for legacy scheduling |
+| `github_issue_workers` | Independent same-host polling workers, default `8` |
+| `github_auto_merge` | Merge verified PRs only with user authorization, default `false` |
+| `github_close_proved_issues` | Close proved issues after a verified remote merge, default `false` |
 | `lean_target` | Candidate Lean source file |
 | `comparator_command` | Existing comparator that checks the exact frozen problem |
 | `github_status_publish` | Publish the status website to Pages (default `true`); local HTML is always generated |
@@ -99,12 +107,13 @@ hmz exec -f user/recursive_lean_prover:github-theorem-prover \
 ```
 
 Select worker/reviewer models through the existing Humanize agent configuration.
-For the Zhengyang workspace, model execution must use the local Codex authentication
-and API configuration at `/home/zhengyang/.codex`; do not substitute a provider when
-it is missing. Never use `rust.cat` endpoints. Keep web search disabled for First
-Proof Second Batch Humanize. This variant retains the reference workflow's direct
-Lean-Eval problem acquisition and reference snapshots; disabling web search does
-not replace those prerequisites or add an offline problem-import mode.
+Use the local Codex authentication and API configuration required by the current
+user and project instructions; do not substitute another provider when it is
+missing. The Deuring experiment uses `CODEX_HOME=/home/ubuntu/.codex`. Never use
+`rust.cat` endpoints. Keep web search disabled for First Proof Second Batch Humanize.
+Set `local_problem: true` for a supplied local contract; otherwise the reference
+workflow's Lean-Eval acquisition and reference snapshots remain required. Disabling
+web search alone does not select local-problem mode.
 
 The flow handles one root theorem per invocation. For multiple independent roots,
 run it once for each selected problem with the correct root contract. This workflow
@@ -127,8 +136,8 @@ graph contributes to completion. Missing or cyclic dependencies cannot report a
 verified problem. The website publishes an explicit subset of DAG fields; local
 paths, agent prompts, authentication and raw process logs are not included.
 
-Local HTML updates on every saved DAG change. The page reloads every minute unless
-someone is reading an expanded theorem or using the filters. It works from disk or
+Local HTML updates on every saved DAG change. The page refreshes snapshots while
+preserving expanded theorems, filters, scroll and DAG zoom. It works from disk or
 a basic static web server, with no external scripts, fonts, build tools or browser
 credentials. Find the local page at the path printed by the workflow, or beneath:
 
@@ -154,7 +163,8 @@ branch without overwriting earlier problem pages or an existing homepage.
 
 The first snapshot publishes before proof work; later hosted updates run in the
 background every ten minutes by default, with a final snapshot when the run exits.
-They also refresh recorded PR states. The browser displays the latest deployed
+They also refresh recorded issue and PR states. For minute-by-minute observations
+without a Pages rebuild, attach the [live observer](live-status.md). The browser displays the latest deployed
 snapshot; Pages builds are asynchronous, so a pushed source revision is not a claim
 that deployment has completed. Once the run stops, its website remains a timestamped
 snapshot; resume the workflow to refresh it again.
