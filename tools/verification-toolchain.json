@@ -1,0 +1,16 @@
+{
+  "lean": "leanprover/lean4:v4.33.1",
+  "mathlib": "db584cd6d46c92f209a44c0f1c829460d327499d",
+  "comparator": "3927ad383f208ae977c340a91c48ac9b497d2097",
+  "lean4export": "15f6055e299ad5b89345e533cc2192f4cc00f659",
+  "landrun": "62823c05e58ec22c1f91b4c8468318c1f97f2d32",
+  "humanize1_flowverse": "029c808b78f237daa624d798ae00843c2b0ca094",
+  "comparator_patch": "comparator-exports.patch",
+  "comparator_toolchain_override": "v4.33.1",
+  "lean4export_toolchain_override": "v4.33.1",
+  "landrun_build": "CGO_ENABLED=0 go1.25.1 build ./cmd/landrun",
+  "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
+  "nanoda": false,
+  "checks": ["frozen statement and context equality", "transitive axioms", "Lean kernel replay"],
+  "sandbox": "Landlock best-effort on ABI v4 plus systemd RestrictAddressFamilies=~AF_UNIX"
+}

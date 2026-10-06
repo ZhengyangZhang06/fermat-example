@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 set -eu
-printf '%s\n' 'BLOCKED: the pinned Lean project and exact-contract comparator are not installed.' >&2
-exit 2
+exec /home/ubuntu/.local/bin/python3.12 /mnt/data/zhengyang-workspace/fermat-example/tools/verify-node.py "$@"

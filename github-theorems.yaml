@@ -1,4 +1,5 @@
 github_repository: ZhengyangZhang06/fermat-example
+local_problem: true
 github_workspace_remote: origin
 github_base_branch: main
 github_root_lean_name: WeierstrassCurve.exists_ne_zero_and_char_nsmul_eq_zero_of_comp_self_add_smul_eq_smul_of_dvd_of_not_dvd
@@ -20,8 +21,8 @@ github_status_branch: gh-pages
 github_status_interval: 600
 problem_id: deuring-criterion
 lean_target: Submission.lean
-# Fail closed until the pinned project and exact-contract comparator are restored.
-comparator_command: bash tools/check-with-comparator.sh
+# Always invoke the controller-owned verifier, not a candidate-modifiable wrapper.
+comparator_command: /home/ubuntu/.local/bin/python3.12 /mnt/data/zhengyang-workspace/fermat-example/tools/verify-node.py
 comparator_success: Your solution is okay!
 artifact_dir: .humanize/github-theorem-prover
 max_depth: 3

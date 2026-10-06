@@ -1,0 +1,17 @@
+diff --git a/Main.lean b/Main.lean
+index 37063f8..757636f 100644
+--- a/Main.lean
++++ b/Main.lean
+@@ -321,4 +321,11 @@ def main (args : List String) : IO Unit := do
+     | throw <| .userError "Expected config file path as first argument."
+   let content ← IO.FS.readFile configPath
+   let config ← IO.ofExcept <| Lean.FromJson.fromJson? <| ← IO.ofExcept <| Lean.Json.parse content
+-  Comparator.M.run Comparator.compareIt config
++  match args.drop 1 with
++  | [] => Comparator.M.run Comparator.compareIt config
++  | ["--exports", challengePath, solutionPath] =>
++    let challenge ← IO.FS.readFile challengePath
++    let solution ← IO.FS.readFile solutionPath
++    Comparator.M.run (Comparator.verifyMatch challenge solution) config
++    IO.println "Your solution is okay!"
++  | _ => throw <| .userError "Expected config.json [--exports challenge.export solution.export]"
