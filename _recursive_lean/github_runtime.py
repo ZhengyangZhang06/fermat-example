@@ -453,6 +453,11 @@ class GitHubTheoremRuntime(Runtime):
                 "circularity. Only after that check, set `publication_proof_reviewed=true` and "
                 f"set `publication_proof_blob` to the output of `git rev-parse HEAD:{path}`. "
                 "This prose review is mandatory in addition to the comparator rerun.\n"
+                "The complete integrated solution must also preserve every accepted child's "
+                "exact globally qualified declaration name and frozen type, even if the root "
+                "proof does not use that historical child. Check for duplicated namespaces "
+                "and repeated placeholder scaffolds after overlays; root-only verification "
+                "does not establish preservation of child interfaces.\n"
             )
         return instructions
 

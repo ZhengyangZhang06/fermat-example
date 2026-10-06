@@ -5070,6 +5070,33 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
         """Cherry-pick reviewed commits, unioning only ordinary tracked Lean conflicts."""
         unioned = False
         for commit in commits:
+            # Cherry-picking changes commit identities. Preserve a local receipt for
+            # each applied patch, bound to the resulting history, so a later proof
+            # repair does not replay old placeholder-restoration commits. Receipts
+            # are bookkeeping only; all combined-source proof gates still run.
+            receipts = subprocess.run(
+                ["git", "for-each-ref", "--format=%(objectname)",
+                 f"refs/humanize/applied/{commit}/"],
+                cwd=integration, capture_output=True, text=True, check=False,
+            )
+            if receipts.returncode:
+                return False, unioned, "could not inspect applied-commit receipts"
+            if any(
+                subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", applied, "HEAD"],
+                    cwd=integration, capture_output=True, check=False,
+                ).returncode == 0
+                for applied in receipts.stdout.splitlines()
+            ):
+                continue
+
+            def record_application() -> bool:
+                head = self._git_head(integration)
+                return bool(head) and subprocess.run(
+                    ["git", "update-ref", f"refs/humanize/applied/{commit}/{head}", head],
+                    cwd=integration, capture_output=True, check=False,
+                ).returncode == 0
+
             picked = subprocess.run(
                 [*INTEGRATION_GIT, "cherry-pick", commit],
                 cwd=integration,
@@ -5078,6 +5105,8 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                 check=False,
             )
             if picked.returncode == 0:
+                if not record_application():
+                    return False, unioned, "could not record applied-commit receipt"
                 continue
             status = subprocess.run(
                 ["git", "status", "--porcelain"],
@@ -5098,6 +5127,8 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     check=False,
                 )
                 if skipped.returncode == 0:
+                    if not record_application():
+                        return False, unioned, "could not record applied-commit receipt"
                     continue
             resolved, detail = self._union_lean_conflicts(integration)
             if not resolved:
@@ -5152,6 +5183,8 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                         check=False,
                     )
                     if skipped.returncode == 0:
+                        if not record_application():
+                            return False, unioned, "could not record applied-commit receipt"
                         continue
                 subprocess.run(
                     ["git", "cherry-pick", "--abort"],
@@ -5165,6 +5198,8 @@ Use the independently reviewed proof at `{handoff.natural_proof_path}` directly.
                     unioned,
                     f"could not commit reconciled Lean sources: {detail}",
                 )
+            if not record_application():
+                return False, unioned, "could not record applied-commit receipt"
         return True, unioned, "candidate commits applied"
 
     @staticmethod

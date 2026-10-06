@@ -2716,6 +2716,26 @@ class WorktreeTests(unittest.TestCase):
                     (parent_worktree / "Child.lean").read_text(),
                     "theorem accepted_child : True := by trivial\n",
                 )
+                # A proof repair may edit the overlaid declaration. Replaying the
+                # original child history would duplicate it during Lean unioning.
+                repaired = "theorem accepted_child : True := True.intro\n"
+                (parent_worktree / "Child.lean").write_text(repaired)
+                git(parent_worktree, "add", "Child.lean")
+                git(parent_worktree, "commit", "-m", "test: repair combined proof")
+                repaired_head = runtime._git_head(parent_worktree)
+                for _ in range(2):
+                    passed, feedback = runtime._overlay_accepted_children(parent, parent_worktree)
+                    self.assertTrue(passed, feedback)
+                    self.assertEqual(runtime._git_head(parent_worktree), repaired_head)
+                    self.assertEqual((parent_worktree / "Child.lean").read_text(), repaired)
+
+                # Receipts are repository-wide, but cannot skip work on a sibling
+                # history that does not descend from the recorded application.
+                sibling = project.parent / "receipt-sibling"
+                git(project, "worktree", "add", "--detach", str(sibling), child_base)
+                passed, _, feedback = runtime._apply_candidate_commits(sibling, [child.candidate_commit])
+                self.assertTrue(passed, feedback)
+                self.assertTrue((sibling / "Child.lean").is_file())
             finally:
                 os.chdir(original)
 
